@@ -1,13 +1,16 @@
+import logging
+from typing import Optional, Tuple
+
 import gradio as gr
+import mysql.connector
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import mysql.connector
-import logging
+
 from database.db_config import DatabaseConfig
-from typing import Optional, Dict, Any, Tuple
 
 logger = logging.getLogger(__name__)
+
 
 class DelinquanceApp:
     def __init__(self):
@@ -21,13 +24,15 @@ class DelinquanceApp:
                 host=self.db_config.HOST,
                 user=self.db_config.USER,
                 password=self.db_config.PASSWORD,
-                database=self.db_config.DATABASE
+                database=self.db_config.DATABASE,
             )
         except Exception as e:
             logger.error(f"Erreur de connexion à la BD: {e}")
             raise
 
-    def _execute_query(self, query: str, params: Optional[tuple] = None) -> pd.DataFrame:
+    def _execute_query(
+        self, query: str, params: Optional[tuple] = None
+    ) -> pd.DataFrame:
         """Exécute une requête SQL et retourne un DataFrame Pandas"""
         try:
             cursor = self.conn.cursor(dictionary=True)
@@ -40,9 +45,12 @@ class DelinquanceApp:
         finally:
             cursor.close()
 
-    def get_statistics(self, region: Optional[str] = None, 
-                      annee: Optional[str] = None, 
-                      type_delit: Optional[str] = None) -> pd.DataFrame:
+    def get_statistics(
+        self,
+        region: Optional[str] = None,
+        annee: Optional[str] = None,
+        type_delit: Optional[str] = None,
+    ) -> pd.DataFrame:
         """Récupère les statistiques selon les filtres"""
         try:
             query = """
@@ -79,7 +87,7 @@ class DelinquanceApp:
     def create_map(self, annee: str, type_delit: Optional[str] = None) -> go.Figure:
         """Crée une carte de la France avec les statistiques"""
         df = self.get_statistics(annee=annee, type_delit=type_delit)
-        
+
         # Création de la carte
         fig = px.choropleth(
             df,
@@ -89,75 +97,76 @@ class DelinquanceApp:
             color="taux_pour_mille",
             color_continuous_scale="Viridis",
             title=f"Carte de la délinquance en France en {annee}",
-            labels={"taux_pour_mille": "Taux pour mille"}
+            labels={"taux_pour_mille": "Taux pour mille"},
         )
         fig.update_geos(fitbounds="locations", visible=False)
         return fig
 
-    def create_time_series(self, region: Optional[str] = None, 
-                          type_delit: Optional[str] = None) -> go.Figure:
+    def create_time_series(
+        self, region: Optional[str] = None, type_delit: Optional[str] = None
+    ) -> go.Figure:
         """Crée un graphique d'évolution temporelle"""
         df = self.get_statistics(region=region, type_delit=type_delit)
-        
+
         # Utilisation de Pandas pour l'agrégation des données
-        grouped_df = df.groupby(['annee', 'classe'])['faits'].sum().reset_index()
-        
+        grouped_df = df.groupby(["annee", "classe"])["faits"].sum().reset_index()
+
         fig = px.line(
             grouped_df,
-            x='annee',
-            y='faits',
-            color='classe',
-            title='Évolution temporelle des faits'
+            x="annee",
+            y="faits",
+            color="classe",
+            title="Évolution temporelle des faits",
         )
         return fig
 
     def get_filter_options(self) -> Tuple[list, list, list]:
         """Récupère les options pour les filtres depuis la base de données"""
-        years = self._execute_query("SELECT DISTINCT annee FROM statistiques ORDER BY annee")
-        regions = self._execute_query("SELECT DISTINCT code_region, nom_region FROM regions")
-        delits = self._execute_query("SELECT DISTINCT classe FROM categories ORDER BY classe")
-        
-        return (
-            years['annee'].tolist(),
-            [("Toutes", "Toutes")] + list(zip(regions['code_region'], regions['nom_region'])),
-            ["Tous"] + delits['classe'].tolist()
+        years = self._execute_query(
+            "SELECT DISTINCT annee FROM statistiques ORDER BY annee"
         )
+        regions = self._execute_query(
+            "SELECT DISTINCT code_region, nom_region FROM regions"
+        )
+        delits = self._execute_query(
+            "SELECT DISTINCT classe FROM categories ORDER BY classe"
+        )
+
+        return (
+            years["annee"].tolist(),
+            [("Toutes", "Toutes")]
+            + list(zip(regions["code_region"], regions["nom_region"])),
+            ["Tous"] + delits["classe"].tolist(),
+        )
+
 
 def create_and_launch_interface(share: bool, server_name: str, server_port: int):
     """Crée et lance l'interface Gradio"""
     app = DelinquanceApp()
     years, regions, delits = app.get_filter_options()
-    
+
     logger.info("Création de l'interface Gradio")
 
     with gr.Blocks() as interface:
         gr.Markdown("# Analyse de la Délinquance en France")
-        
+
         with gr.Row():
             with gr.Column():
                 annee = gr.Dropdown(
                     choices=[str(i) for i in years],
                     value=str(max(years)),
-                    label="Année"
+                    label="Année",
                 )
-                region = gr.Dropdown(
-                    choices=regions,
-                    value="Toutes",
-                    label="Région"
-                )
+                region = gr.Dropdown(choices=regions, value="Toutes", label="Région")
                 type_delit = gr.Dropdown(
-                    choices=delits,
-                    value="Tous",
-                    label="Type de délit"
+                    choices=delits, value="Tous", label="Type de délit"
                 )
 
         with gr.Tabs():
             with gr.TabItem("Carte"):
                 carte_plot = gr.Plot()
                 annee.change(
-                    fn=app.create_map,
-                    inputs=[annee, type_delit],
-                    outputs=carte_plot
+                    fn=app.create_map, inputs=[annee, type_delit], outputs=carte_plot
                 )
 
             with gr.TabItem("Évolution Temporelle"):
@@ -166,7 +175,9 @@ def create_and_launch_interface(share: bool, server_name: str, server_port: int)
                     input_component.change(
                         fn=app.create_time_series,
                         inputs=[region, type_delit],
-                        outputs=series_plot
+                        outputs=series_plot,
                     )
 
-    interface.launch(share=share, server_name=server_name, server_port=server_port, debug=True)
+    interface.launch(
+        share=share, server_name=server_name, server_port=server_port, debug=True
+    )
