@@ -1,160 +1,159 @@
 import pandas as pd
 import mysql.connector
+from sqlalchemy import create_engine
 import logging
-import requests
 from mysql.connector import Error
 from .db_config import DatabaseConfig
 from typing import Optional, Dict, Any
-import json
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
 class DataLoader:
     def __init__(self):
         self.config = DatabaseConfig()
-        self.API_BASE_URL = "https://www.data.gouv.fr/api/1"
-        self.DATASET_ID = "base-statistique-communale-departementale-et-regionale-de-la-delinquance-enregistree"
-    
-    def fetch_from_api(self) -> Optional[pd.DataFrame]:
-        """Récupère les données depuis l'API data.gouv.fr"""
-        try:
-            # Récupération des métadonnées du dataset
-            dataset_url = f"{self.API_BASE_URL}/datasets/{self.DATASET_ID}/"
-            response = requests.get(dataset_url)
-            response.raise_for_status()
-            
-            dataset_info = response.json()
-            logger.info(f"Dataset trouvé: {dataset_info['title']}")
-            
-            # Récupération de l'URL de la ressource la plus récente
-            resources = dataset_info.get('resources', [])
-            if not resources:
-                raise ValueError("Aucune ressource trouvée dans le dataset")
-            
-            # Trier les ressources par date et prendre la plus récente
-            latest_resource = sorted(
-                resources,
-                key=lambda x: x['last_modified'],
-                reverse=True
-            )[0]
-            
-            # Téléchargement des données
-            data_response = requests.get(latest_resource['url'])
-            data_response.raise_for_status()
-            
-            # Conversion en DataFrame
-            df = pd.read_csv(data_response.content, sep=';', encoding='utf-8')
-            logger.info(f"Données téléchargées avec succès: {len(df)} lignes")
-            
-            return self._clean_data(df)
-            
-        except requests.RequestException as e:
-            logger.error(f"Erreur lors de la requête API: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"Erreur lors du téléchargement des données: {e}")
-            raise
+        # Connection SQLAlchemy pour les opérations Pandas
+        self.engine = create_engine(
+            f'mysql+mysqlconnector://{self.config.USER}:{self.config.PASSWORD}@{self.config.HOST}/{self.config.DATABASE}'
+        )
     
     def _clean_data(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Nettoie et prépare les données"""
+        """Nettoie et prépare les données avec Pandas"""
         try:
-            # Nettoyage des noms de colonnes
-            df.columns = df.columns.str.lower().str.replace('.', '_')
+            # Mapping des colonnes
+            column_mapping = {
+                'Code.région': 'code_region',
+                'classe': 'classe',
+                'annee': 'annee',
+                'unité.de.compte': 'unite_compte',
+                'faits': 'faits',
+                'POP': 'population',
+                'LOG': 'logements',
+                'tauxpourmille': 'taux_pour_mille'
+            }
             
-            # Conversion des types de données
-            numeric_columns = ['annee', 'faits', 'pop', 'tauxpourmille']
+            # Renommage des colonnes
+            df = df.rename(columns=column_mapping)
+            
+            # Nettoyage des strings
+            string_columns = ['code_region', 'classe', 'unite_compte']
+            df[string_columns] = df[string_columns].astype(str).apply(lambda x: x.str.strip())
+            
+            # Remplacer les virgules par des points dans les colonnes numériques
+            numeric_columns = ['faits', 'population', 'logements', 'taux_pour_mille']
             for col in numeric_columns:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                df[col] = df[col].astype(str).str.replace(',', '.').str.strip()
             
-            # Suppression des lignes avec des valeurs manquantes
-            df = df.dropna(subset=['code_region', 'faits', 'pop'])
+            # Conversion des types avec gestion d'erreurs
+            df = df.astype({
+                'code_region': str,
+                'classe': str,
+                'unite_compte': str,
+                'annee': 'Int64',
+                'faits': 'float64',
+                'population': 'float64',
+                'logements': 'float64',
+                'taux_pour_mille': 'float64'
+            })
+            
+            # Gestion des valeurs manquantes
+            df = df.dropna(subset=['code_region', 'classe', 'annee', 'faits'])
             
             return df
-            
+                
         except Exception as e:
             logger.error(f"Erreur lors du nettoyage des données: {e}")
             raise
+
+    def _convert_numpy_to_python(self, value):
+        """Convertit les types numpy en types Python natifs"""
+        if isinstance(value, (np.int64, np.int32)):
+            return int(value)
+        elif isinstance(value, (np.float64, np.float32)):
+            return float(value)
+        return value
     
-    def load_data(self, source: str = 'api', file_path: Optional[str] = None) -> None:
-        """
-        Charge les données depuis l'API ou un fichier CSV
-        
-        Args:
-            source: 'api' ou 'csv'
-            file_path: Chemin du fichier CSV si source='csv'
-        """
+    def _insert_data_to_mysql(self, table_name: str, df: pd.DataFrame) -> None:
+        """Insère les données dans MySQL en utilisant des requêtes optimisées"""
         try:
-            # Récupération des données
-            if source == 'api':
-                df = self.fetch_from_api()
-            elif source == 'csv' and file_path:
-                df = pd.read_csv(file_path, sep=';', encoding='utf-8')
-                df = self._clean_data(df)
-            else:
-                raise ValueError("Source non valide ou fichier manquant")
-            
-            # Insertion dans la base de données
-            self.insert_data(df)
-            
-        except Exception as e:
-            logger.error(f"Erreur lors du chargement des données: {e}")
-            raise
-    
-    def insert_data(self, df: pd.DataFrame) -> None:
-        """Insère les données dans la base de données"""
-        try:
-            conn = mysql.connector.connect(**self.config.get_connection_params())
+            conn = mysql.connector.connect(
+                host=self.config.HOST,
+                user=self.config.USER,
+                password=self.config.PASSWORD,
+                database=self.config.DATABASE
+            )
             cursor = conn.cursor()
-            
-            # Désactivation temporaire des contraintes de clé étrangère
-            cursor.execute("SET FOREIGN_KEY_CHECKS = 0")
-            
-            # Insertion des régions uniques
-            regions = df[['code_region', 'region']].drop_duplicates()
-            for _, row in regions.iterrows():
-                cursor.execute("""
-                    INSERT IGNORE INTO regions (code_region, nom_region)
-                    VALUES (%s, %s)
-                """, (row['code_region'], row['region']))
-            
-            # Insertion des catégories uniques avec leurs unités de compte
-            categories = df[['classe', 'unite_de_compte']].drop_duplicates()
-            for _, row in categories.iterrows():
-                cursor.execute("""
-                    INSERT IGNORE INTO categories (classe, unite_compte)
-                    VALUES (%s, %s)
-                """, (row['classe'], row['unite_de_compte']))
-            
-            # Insertion des statistiques
-            for _, row in df.iterrows():
-                cursor.execute("""
-                    INSERT INTO statistiques 
-                    (code_region, classe, annee, unite_compte, faits, 
-                     population, logements, taux_pour_mille)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """, (
-                    row['code_region'],
-                    row['classe'],
-                    row['annee'],
-                    row['unite_de_compte'],
-                    row['faits'],
-                    row['pop'],
-                    row['log'],
-                    row['tauxpourmille']
+
+            # Préparation des requêtes selon la table
+            if table_name == 'regions':
+                query = "INSERT IGNORE INTO regions (code_region, nom_region) VALUES (%s, %s)"
+                values = list(zip(df['code_region'], df['nom_region']))
+            elif table_name == 'categories':
+                query = "INSERT IGNORE INTO categories (classe, unite_compte) VALUES (%s, %s)"
+                values = list(zip(df['classe'], df['unite_compte']))
+            elif table_name == 'statistiques':
+                query = """
+                INSERT INTO statistiques 
+                (code_region, classe, annee, unite_compte, faits, population, logements, taux_pour_mille) 
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """
+                values = list(zip(
+                    df['code_region'], df['classe'], df['annee'],
+                    df['unite_compte'], df['faits'], df['population'],
+                    df['logements'], df['taux_pour_mille']
                 ))
-            
-            # Réactivation des contraintes de clé étrangère
-            cursor.execute("SET FOREIGN_KEY_CHECKS = 1")
-            
-            conn.commit()
-            logger.info("Données insérées avec succès")
-            
+
+            # Convertir les types numpy en types Python natifs
+            values = [tuple(self._convert_numpy_to_python(value) for value in row) for row in values]
+
+            # Exécution par lots pour optimiser les performances
+            batch_size = 1000
+            for i in range(0, len(values), batch_size):
+                batch = values[i:i + batch_size]
+                cursor.executemany(query, batch)
+                conn.commit()
+
         except Error as e:
-            logger.error(f"Erreur lors de l'insertion des données: {e}")
-            conn.rollback()
+            logger.error(f"Erreur lors de l'insertion dans MySQL: {e}")
             raise
         finally:
             if conn.is_connected():
                 cursor.close()
                 conn.close()
+    
+    def load_data(self, source: str = 'csv', file_path: Optional[str] = None) -> None:
+        """Charge et traite les données depuis un CSV vers MySQL"""
+        try:
+            if source == 'csv' and file_path:
+                logger.info(f"Lecture du fichier CSV: {file_path}")
+                
+                # Lecture et nettoyage avec Pandas
+                df = pd.read_csv(
+                    file_path,
+                    sep=';',
+                    encoding='utf-8',
+                    decimal=','  # Ajoutez ce paramètre pour gérer les séparateurs décimaux
+                )
+                df = self._clean_data(df)
+                logger.info(f"Données nettoyées: {len(df)} lignes")
+                
+                # Préparation des DataFrames pour chaque table
+                regions_df = df[['code_region']].drop_duplicates()
+                regions_df['nom_region'] = 'Region ' + regions_df['code_region']
+                
+                categories_df = df[['classe', 'unite_compte']].drop_duplicates()
+                
+                # Insertion dans MySQL table par table
+                logger.info("Insertion des données dans MySQL...")
+                self._insert_data_to_mysql('regions', regions_df)
+                self._insert_data_to_mysql('categories', categories_df)
+                self._insert_data_to_mysql('statistiques', df)
+                
+                logger.info("Chargement des données terminé avec succès")
+                
+            else:
+                raise ValueError("Source non valide ou fichier manquant")
+                
+        except Exception as e:
+            logger.error(f"Erreur lors du chargement des données: {e}")
+            raise
