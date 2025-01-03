@@ -35,34 +35,6 @@ class DatabaseInitializer:
                 )
                 raise
 
-    def clean_database(self) -> None:
-        """Nettoie la base de données en supprimant toutes les données"""
-        try:
-            conn = mysql.connector.connect(**self.config.get_connection_params())
-            cursor = conn.cursor()
-
-            # Désactiver temporairement les contraintes de clé étrangère
-            cursor.execute("SET FOREIGN_KEY_CHECKS = 0")
-
-            # Supprimer les données de toutes les tables
-            for table_name in self.config.TABLES.keys():
-                cursor.execute(f"TRUNCATE TABLE {table_name}")
-                logger.info(f"Table {table_name} vidée avec succès")
-
-            # Réactiver les contraintes de clé étrangère
-            cursor.execute("SET FOREIGN_KEY_CHECKS = 1")
-
-            conn.commit()
-            logger.info("Nettoyage de la base de données terminé")
-
-        except Error as e:
-            logger.error(f"Erreur lors du nettoyage de la base de données: {e}")
-            raise
-        finally:
-            if "conn" in locals() and conn.is_connected():
-                cursor.close()
-                conn.close()
-
     def create_database(self, force_reload: bool = False) -> None:
         """Crée la base de données et charge les données initiales"""
         try:
@@ -97,7 +69,7 @@ class DatabaseInitializer:
                     logger.info("Chargement des données initiales...")
                     self.data_loader.load_data(
                         source="csv",
-                        file_path="donnee-dep-data.gouv-2023-geographie2024-produit-le2024-07-05.csv",
+                        file_path="donnee-del-data.gouv.csv",
                     )
                     logger.info("Données initiales chargées avec succès")
                 except Exception as e:

@@ -9,42 +9,42 @@ load_dotenv()
 
 
 def get_default_tables() -> Dict[str, str]:
-    """Returns the default tables configuration"""
+    """Retourne la configuration par défaut des tables"""
     return {
-        "regions": """
-            CREATE TABLE IF NOT EXISTS regions (
-                code_region VARCHAR(10) PRIMARY KEY,
-                nom_region VARCHAR(100) NOT NULL,
-                INDEX idx_nom_region (nom_region)
+        "crimes": """
+            CREATE TABLE IF NOT EXISTS crimes (
+                id_crime INT AUTO_INCREMENT PRIMARY KEY,
+                type_crime VARCHAR(100) NOT NULL,
+                unite_compte VARCHAR(50) NOT NULL,
+                annee INT NOT NULL,
+                nombre_faits INT NOT NULL,
+                UNIQUE KEY unique_crime_annee (type_crime, annee),
+                INDEX idx_type_crime (type_crime),
+                INDEX idx_annee (annee)
             ) ENGINE=InnoDB
         """,
-        "categories": """
-            CREATE TABLE IF NOT EXISTS categories (
-                id_categorie INT AUTO_INCREMENT PRIMARY KEY,
-                classe VARCHAR(100) NOT NULL,
-                unite_compte VARCHAR(50) NOT NULL,
-                UNIQUE KEY unique_classe (classe),
-                INDEX idx_unite_compte (unite_compte)
+        "departements": """
+            CREATE TABLE IF NOT EXISTS departements (
+                code_departement VARCHAR(3) PRIMARY KEY,
+                code_region VARCHAR(2) NOT NULL,
+                population INT NOT NULL,
+                logements INT NOT NULL,
+                INDEX idx_code_region (code_region)
             ) ENGINE=InnoDB
         """,
         "statistiques": """
             CREATE TABLE IF NOT EXISTS statistiques (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                code_region VARCHAR(10),
-                classe VARCHAR(100),
-                annee INT NOT NULL,
-                unite_compte VARCHAR(50),
-                faits INT NOT NULL,
-                population INT NOT NULL,
-                logements FLOAT,
-                taux_pour_mille FLOAT,
-                FOREIGN KEY (code_region) REFERENCES regions(code_region),
-                FOREIGN KEY (classe) REFERENCES categories(classe),
-                INDEX idx_annee (annee),
-                INDEX idx_region_annee (code_region, annee),
-                INDEX idx_classe_annee (classe, annee)
+                id_statistique INT AUTO_INCREMENT PRIMARY KEY,
+                id_crime INT NOT NULL,
+                code_departement VARCHAR(3) NOT NULL,
+                taux_pour_mille FLOAT NOT NULL,
+                FOREIGN KEY (id_crime) REFERENCES crimes(id_crime),
+                FOREIGN KEY (code_departement) REFERENCES departements(code_departement),
+                UNIQUE KEY unique_stat (id_crime, code_departement),
+                INDEX idx_departement (code_departement),
+                INDEX idx_crime_dept (id_crime, code_departement)
             ) ENGINE=InnoDB
-        """,
+        """
     }
 
 
