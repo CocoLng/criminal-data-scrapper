@@ -8,7 +8,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("app.log", mode="w"),  # Assurez-vous que le mode est 'w'
+        logging.FileHandler("app.log", mode="w"), 
         logging.StreamHandler(),
     ],
 )

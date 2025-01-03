@@ -1,0 +1,155 @@
+{
+  "mapping": {
+    "100": {
+      "categorie_csv": "Homicides",
+      "score_similarite": 0.9999557187061094
+    },
+    "36": {
+      "categorie_csv": "Cambriolages de logement",
+      "score_similarite": 0.9998070847150259
+    },
+    "84": {
+      "categorie_csv": "Vols avec armes",
+      "score_similarite": 0.9995406859400413
+    },
+    "67": {
+      "categorie_csv": "Vols violents sans arme",
+      "score_similarite": 0.9992649469831296
+    },
+    "40": {
+      "categorie_csv": "Trafic de stupéfiants",
+      "score_similarite": 0.9991869644703373
+    },
+    "34": {
+      "categorie_csv": "Vols d'accessoires sur véhicules",
+      "score_similarite": 0.997695694670047
+    },
+    "42": {
+      "categorie_csv": "Vols dans les véhicules",
+      "score_similarite": 0.9976945368472903
+    },
+    "11": {
+      "categorie_csv": "Vols de véhicules",
+      "score_similarite": 0.997172087288963
+    },
+    "66": {
+      "categorie_csv": "Violences sexuelles",
+      "score_similarite": 0.9971607593703058
+    },
+    "106": {
+      "categorie_csv": "Autres coups et blessures volontaires",
+      "score_similarite": 0.9971494825297603
+    },
+    "26": {
+      "categorie_csv": "Coups et blessures volontaires intrafamiliaux",
+      "score_similarite": 0.9969940605225888
+    },
+    "6": {
+      "categorie_csv": "Coups et blessures volontaires",
+      "score_similarite": 0.9949988512030956
+    },
+    "41": {
+      "categorie_csv": "Usage de stupéfiants",
+      "score_similarite": 0.9870383798634408
+    },
+    "90": {
+      "categorie_csv": "Escroqueries",
+      "score_similarite": 0.9725237101459678
+    },
+    "56": {
+      "categorie_csv": "Destructions et dégradations volontaires",
+      "score_similarite": 0.8738730828057006
+    },
+    "31": {
+      "categorie_csv": "Vols sans violence contre des personnes",
+      "score_similarite": 0.8436364063769772
+    }
+  },
+  "validation": {
+    "100": {
+      "categorie_csv": "Homicides",
+      "difference_relative": 0.2757009345794392,
+      "confiance": "Moyenne"
+    },
+    "36": {
+      "categorie_csv": "Cambriolages de logement",
+      "difference_relative": 0.16290226085113615,
+      "confiance": "Haute"
+    },
+    "84": {
+      "categorie_csv": "Vols avec armes",
+      "difference_relative": 0.0026362038664323375,
+      "confiance": "Haute"
+    },
+    "67": {
+      "categorie_csv": "Vols violents sans arme",
+      "difference_relative": 0.16423957222051325,
+      "confiance": "Haute"
+    },
+    "40": {
+      "categorie_csv": "Trafic de stupéfiants",
+      "difference_relative": 0.11008980134853204,
+      "confiance": "Haute"
+    },
+    "34": {
+      "categorie_csv": "Vols d'accessoires sur véhicules",
+      "difference_relative": 0.07700262460842536,
+      "confiance": "Haute"
+    },
+    "42": {
+      "categorie_csv": "Vols dans les véhicules",
+      "difference_relative": 0.17683245281774151,
+      "confiance": "Haute"
+    },
+    "11": {
+      "categorie_csv": "Vols de véhicules",
+      "difference_relative": 0.10097269813197746,
+      "confiance": "Haute"
+    },
+    "66": {
+      "categorie_csv": "Violences sexuelles",
+      "difference_relative": 0.18227632081386744,
+      "confiance": "Haute"
+    },
+    "106": {
+      "categorie_csv": "Autres coups et blessures volontaires",
+      "difference_relative": 0.20163814236206434,
+      "confiance": "Moyenne"
+    },
+    "26": {
+      "categorie_csv": "Coups et blessures volontaires intrafamiliaux",
+      "difference_relative": 0.19231741720668993,
+      "confiance": "Haute"
+    },
+    "6": {
+      "categorie_csv": "Coups et blessures volontaires",
+      "difference_relative": 0.11095108336553404,
+      "confiance": "Haute"
+    },
+    "41": {
+      "categorie_csv": "Usage de stupéfiants",
+      "difference_relative": 0.055077475177601774,
+      "confiance": "Haute"
+    },
+    "90": {
+      "categorie_csv": "Escroqueries",
+      "difference_relative": 0.10235739495037857,
+      "confiance": "Haute"
+    },
+    "56": {
+      "categorie_csv": "Destructions et dégradations volontaires",
+      "difference_relative": 0.654095942647084,
+      "confiance": "Basse"
+    },
+    "31": {
+      "categorie_csv": "Vols sans violence contre des personnes",
+      "difference_relative": 0.7815746702424028,
+      "confiance": "Basse"
+    }
+  },
+  "timestamp": "2024-12-26T18:20:11.229023",
+  "metadata": {
+    "periode_validation": "2020-2021",
+    "nombre_categories_mappees": 16
+  }
+}
