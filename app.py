@@ -109,11 +109,18 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                 with gr.Row():
                     dept_security = gr.Dropdown(
                         choices=interface_manager.departements,
-                        label="Département"
+                        label="Département",
+                        visible=True
+                    )
+                    dept_security_dest = gr.Dropdown(
+                        choices=interface_manager.departements,
+                        label="Département de destination",
+                        visible=False
                     )
                     year_security = gr.Dropdown(
                         choices=interface_manager.annees,
-                        label="Année"
+                        label="Année",
+                        visible=True
                     )
                     
                 with gr.Row():
@@ -129,8 +136,67 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                         label="Rayon d'analyse (km)",
                         visible=False
                     )
+                    month_security = gr.Dropdown(
+                        choices=[str(i).zfill(2) for i in range(1, 13)],
+                        value="01",
+                        label="Mois",
+                        visible=False
+                    )
                 
                 security_button = gr.Button("Analyser")
+
+                # Fonction pour gérer la visibilité des champs en fonction du service sélectionné
+                def update_security_fields(service):
+                    if service == "TransportSécurité":
+                        return {
+                            dept_security: gr.update(visible=True, label="Département de départ"),
+                            dept_security_dest: gr.update(visible=True),
+                            year_security: gr.update(visible=True),
+                            month_security: gr.update(visible=True),
+                            crime_type_security: gr.update(visible=False),
+                            radius_security: gr.update(visible=False)
+                        }
+                    elif service == "AlerteVoisinage+":
+                        return {
+                            dept_security: gr.update(visible=True, label="Département"),
+                            dept_security_dest: gr.update(visible=False),
+                            year_security: gr.update(visible=True),
+                            month_security: gr.update(visible=False),
+                            crime_type_security: gr.update(visible=False),
+                            radius_security: gr.update(visible=True)
+                        }
+                    elif service == "BusinessSecurity":
+                        return {
+                            dept_security: gr.update(visible=True, label="Département"),
+                            dept_security_dest: gr.update(visible=False),
+                            year_security: gr.update(visible=True),
+                            month_security: gr.update(visible=False),
+                            crime_type_security: gr.update(visible=True),
+                            radius_security: gr.update(visible=False)
+                        }
+                    else:
+                        return {
+                            dept_security: gr.update(visible=True, label="Département"),
+                            dept_security_dest: gr.update(visible=False),
+                            year_security: gr.update(visible=True),
+                            month_security: gr.update(visible=False),
+                            crime_type_security: gr.update(visible=False),
+                            radius_security: gr.update(visible=False)
+                        }
+
+                # Connexion de la fonction de mise à jour avec le dropdown de service
+                security_service.change(
+                    fn=update_security_fields,
+                    inputs=[security_service],
+                    outputs=[
+                        dept_security,
+                        dept_security_dest,
+                        year_security,
+                        month_security,
+                        crime_type_security,
+                        radius_security
+                    ]
+                )
 
             # Onglet Analyse Territoriale
             with gr.Tab("Analyse Territoriale"):
@@ -230,6 +296,60 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                 insights = gr.TextArea(label="Analyse et Recommandations", lines=3)
             with gr.Row():
                 output_df = gr.DataFrame(label="Résultats")
+
+        # Event handlers for service buttons
+        def process_security_request(service, dept, dept_dest, year, crime_type, radius, month):
+            """Process security requests with proper parameter handling"""
+            try:
+                if service == "TransportSécurité":
+                    if not all([dept, dept_dest, year, month]):
+                        return pd.DataFrame(), "Veuillez remplir tous les champs requis"
+                        
+                    # Conversion explicite des types
+                    year_int = int(year) if year else None
+                    month_int = int(month) if month else None
+                    
+                    # Debug log
+                    print(f"DEBUG - Transport Security Request:")
+                    print(f"Départ: {dept}, Arrivée: {dept_dest}")
+                    print(f"Année: {year_int}, Mois: {month_int}")
+                    
+                    return interface_manager.security_service.process_request(
+                        service=service,
+                        department=dept,
+                        department_dest=dept_dest,
+                        year=year_int,
+                        month=month_int
+                    )
+                else:
+                    if not all([dept, year]):
+                        return pd.DataFrame(), "Veuillez remplir tous les champs requis"
+                        
+                    return interface_manager.security_service.process_request(
+                        service=service,
+                        department=dept,
+                        year=int(year) if year else None,
+                        crime_type=crime_type,
+                        radius=int(radius) if radius else None
+                    )
+            except Exception as e:
+                print(f"ERROR in process_security_request: {str(e)}")
+                return pd.DataFrame(), f"Erreur lors du traitement de la requête: {str(e)}"
+
+        
+        security_button.click(
+            process_security_request,
+            inputs=[
+                security_service,
+                dept_security,
+                dept_security_dest,
+                year_security,
+                crime_type_security,
+                radius_security,
+                month_security
+            ],
+            outputs=[output_df, insights]
+        )
                 
         # Event handlers for service buttons
         security_button.click(
