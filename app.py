@@ -19,6 +19,7 @@ class InterfaceManager:
         self.security_service = SecurityService()
         self.territorial_service = TerritorialService()
         self.predictive_service = PredictiveService()
+        self.regions = sorted(self.db.get_distinct_values("departements", "code_region"))
         self._load_initial_values()
 
     def _load_initial_values(self):
@@ -189,28 +190,46 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                 with gr.Row():
                     territorial_service = gr.Dropdown(
                         choices=[
-                            "Diagnostic Territorial",
-                            "Impact Événementiel",
-                            "UrbanSafe",
+                            "Diagnostic Régional",
+                            "Comparaison Inter-Régionale",
+                            "Évolution Régionale"
                         ],
-                        label="Service d'analyse territoriale",
+                        label="Service d'analyse territoriale"
                     )
 
                 with gr.Row():
-                    dept_territorial = gr.Dropdown(
-                        choices=interface_manager.departements,
-                        label="Département de référence",
+                    region_reference = gr.Dropdown(
+                        choices=interface_manager.regions,
+                        label="Région de référence",
+                        visible=True
                     )
-                    compare_type = gr.Dropdown(
-                        choices=[
-                            "Population similaire",
-                            "Même région",
-                            "Départements limitrophes",
-                        ],
-                        label="Type de comparaison",
+                    region_comparison = gr.Dropdown(
+                        choices=interface_manager.regions,
+                        label="Région à comparer",
+                        visible=False
                     )
 
                 territorial_button = gr.Button("Analyser")
+
+                # Fonction pour gérer la visibilité des champs en fonction du service sélectionné
+                def update_territorial_fields(service):
+                    if service == "Comparaison Inter-Régionale":
+                        return {
+                            region_reference: gr.update(visible=True, label="Région de référence"),
+                            region_comparison: gr.update(visible=True)
+                        }
+                    else:
+                        return {
+                            region_reference: gr.update(visible=True, label="Région"),
+                            region_comparison: gr.update(visible=False)
+                        }
+
+                # Connexion de la fonction de mise à jour avec le dropdown de service
+                territorial_service.change(
+                    fn=update_territorial_fields,
+                    inputs=[territorial_service],
+                    outputs=[region_reference, region_comparison]
+                )
 
             # Onglet Prédiction
             with gr.Tab("Prédiction"):
@@ -276,7 +295,8 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
 
                 # Création dynamique des plots en fonction du service sélectionné
                 def update_plots_visibility(service):
-                    if service != "Sécurité Immobilière":
+                    if service == "Sécurité Immobilière":
+                        logger.info("Updating plots visibility for Sécurité Immobilière")
                         return {
                             plot1: gr.update(
                                 visible=True, label="P1"
@@ -284,8 +304,8 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                             plot2: gr.update(
                                 visible=True, label="P2"
                             ),
-                            plot3: gr.update(visible=False),
-                            plot4: gr.update(visible=False),
+                            plot3: gr.update(visible=True),
+                            plot4: gr.update(visible=True),
                         }
                     else:
                         return {
@@ -294,17 +314,17 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                                 visible=True, label="P2"
                             ),
                             plot3: gr.update(
-                                visible=True, label="P3"
+                                visible=False, label="P3"
                             ),
-                            plot4: gr.update(visible=True, label="P4"),
+                            plot4: gr.update(visible=False, label="P4"),
                         }
 
                 with gr.Row():
                     plot1 = gr.Plot(label="P1")
                     plot2 = gr.Plot(label="P2")
                 with gr.Row():
-                    plot3 = gr.Plot(label="P3", visible=True)
-                    plot4 = gr.Plot(label="P4", visible=True)
+                    plot3 = gr.Plot(label="P3", visible=False)
+                    plot4 = gr.Plot(label="P4", visible=False)
 
                 # Connexion de l'événement de changement de service
                 security_service.change(
@@ -360,9 +380,9 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
             )
 
         territorial_button.click(
-            interface_manager.territorial_service.process_request,
-            inputs=[territorial_service, dept_territorial, compare_type],
-            outputs=[output_df, insights],
+            fn=interface_manager.territorial_service.process_request,
+            inputs=[territorial_service, region_reference, region_comparison],
+            outputs=[output_df, insights, plot1, plot2]
         )
 
         prediction_button.click(
