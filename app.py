@@ -309,11 +309,6 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                     year_int = int(year) if year else None
                     month_int = int(month) if month else None
                     
-                    # Debug log
-                    print(f"DEBUG - Transport Security Request:")
-                    print(f"Départ: {dept}, Arrivée: {dept_dest}")
-                    print(f"Année: {year_int}, Mois: {month_int}")
-                    
                     return interface_manager.security_service.process_request(
                         service=service,
                         department=dept,
