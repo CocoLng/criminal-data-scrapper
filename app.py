@@ -139,14 +139,7 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                         label="Type de crime",
                         visible=False,
                     )
-                    radius_security = gr.Slider(
-                        minimum=1,
-                        maximum=10,
-                        value=5,
-                        label="Rayon d'analyse (km)",
-                        visible=False,
-                    )
-
+                    
                 security_button = gr.Button("Analyser")
 
                 # Fonction pour gérer la visibilité des champs en fonction du service sélectionné
@@ -156,31 +149,27 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                             dept_security: gr.update(visible=True, label="Département de départ"),
                             dept_security_dest: gr.update(visible=True),
                             year_security: gr.update(visible=False),
-                            crime_type_security: gr.update(visible=False),
-                            radius_security: gr.update(visible=False)
+                            crime_type_security: gr.update(visible=False)
                         }
                     elif service == "AlerteVoisinage":
                         return {
                             dept_security: gr.update(visible=True, label="Département"),
                             dept_security_dest: gr.update(visible=False),
                             year_security: gr.update(visible=True),
-                            crime_type_security: gr.update(visible=False),
-                            radius_security: gr.update(visible=True)
+                            crime_type_security: gr.update(visible=False)
                         }
                     elif service == "BusinessSecurity":
                         return {
                             dept_security: gr.update(visible=True, label="Département"),
                             dept_security_dest: gr.update(visible=False),
-                            year_security: gr.update(visible=False),
-                            radius_security: gr.update(visible=False)
+                            year_security: gr.update(visible=False)
                         }
                     else:
                         return {
                             dept_security: gr.update(visible=True, label="Département"),
                             dept_security_dest: gr.update(visible=False),
                             year_security: gr.update(visible=True),
-                            crime_type_security: gr.update(visible=False),
-                            radius_security: gr.update(visible=False)
+                            crime_type_security: gr.update(visible=False)
                         }
 
                 # Connexion de la fonction de mise à jour avec le dropdown de service
@@ -192,7 +181,6 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                         dept_security_dest,
                         year_security,
                         crime_type_security,
-                        radius_security,
                     ],
                 )
 
@@ -337,29 +325,25 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                     return {
                         dept_security: gr.update(visible=True, label="Département de départ"),
                         dept_security_dest: gr.update(visible=True),
-                        year_security: gr.update(visible=True),
-                        radius_security: gr.update(visible=False)
+                        year_security: gr.update(visible=True)
                     }
                 elif service == "AlerteVoisinage":
                     return {
                         dept_security: gr.update(visible=True, label="Département"),
                         dept_security_dest: gr.update(visible=False),
-                        year_security: gr.update(visible=True),
-                        radius_security: gr.update(visible=True)
+                        year_security: gr.update(visible=True)
                     }
                 elif service == "BusinessSecurity":
                     return {
                         dept_security: gr.update(visible=True, label="Département"),
                         dept_security_dest: gr.update(visible=False),
-                        year_security: gr.update(visible=True),
-                        radius_security: gr.update(visible=False)
+                        year_security: gr.update(visible=True)
                     }
                 else:
                     return {
                         dept_security: gr.update(visible=True, label="Département"),
                         dept_security_dest: gr.update(visible=False),
-                        year_security: gr.update(visible=True),
-                        radius_security: gr.update(visible=False)
+                        year_security: gr.update(visible=True)
                     }
 
             # Connexion du bouton d'analyse
@@ -370,8 +354,7 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                     dept_security,
                     year_security,
                     dept_security_dest,
-                    crime_type_security,
-                    radius_security,
+                    crime_type_security
                 ],
                 outputs=[output_df, insights, plot1, plot2, plot3, plot4],
             )
