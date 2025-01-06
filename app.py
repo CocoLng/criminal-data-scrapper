@@ -106,9 +106,9 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                     security_service = gr.Dropdown(
                         choices=[
                             "Sécurité Immobilière",
-                            "AlerteVoisinage+",
+                            "AlerteVoisinage",
                             "BusinessSecurity",
-                            "OptimAssurance",
+                            "OptimisationAssurance",
                             "TransportSécurité",
                         ],
                         label="Service de sécurité",
@@ -158,7 +158,7 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                             crime_type_security: gr.update(visible=False),
                             radius_security: gr.update(visible=False)
                         }
-                    elif service == "AlerteVoisinage+":
+                    elif service == "AlerteVoisinage":
                         return {
                             dept_security: gr.update(visible=True, label="Département"),
                             dept_security_dest: gr.update(visible=False),
@@ -287,7 +287,7 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
 
                 # Création dynamique des plots en fonction du service sélectionné
                 def update_plots_visibility(service):
-                    if service == "AlerteVoisinage+" or service == "BusinessSecurity":
+                    if service != "Sécurité Immobilière":
                         return {
                             plot1: gr.update(
                                 visible=True, label="P1"
@@ -339,7 +339,7 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                         year_security: gr.update(visible=True),
                         radius_security: gr.update(visible=False)
                     }
-                elif service == "AlerteVoisinage+":
+                elif service == "AlerteVoisinage":
                     return {
                         dept_security: gr.update(visible=True, label="Département"),
                         dept_security_dest: gr.update(visible=False),

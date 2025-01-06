@@ -31,13 +31,39 @@ class SecurityService:
             
             # Obtenir les données et recommandations
             df, recommendations = self._get_service_data(
-                service, department, full_year, department_dest, crime_type, radius
+                service, department, year, department_dest, crime_type, radius
             )
-            
             if df.empty:
                 return (df, "Aucune donnée disponible", *empty_plots)
                 
             try:
+                if service == "OptimisationAssurance":
+                    try:
+                        # Récupération des données
+                        df, recommendations = self._insurance_optimization(department, year)
+                        if df.empty:
+                            return df, "Aucune donnée disponible", *empty_plots
+                        
+                        # Initialisation des visualisations
+                        plots = empty_plots
+                        
+                        # Création de la heatmap de risque
+                        risk_heatmap = self.visualizer.create_insurance_risk_heatmap(df)
+                        if risk_heatmap:
+                            plots[0] = gr.Plot(risk_heatmap)
+                        
+                        # Création du scoring territorial
+                        scoring_plot = self.visualizer.create_insurance_scoring(df)
+                        if scoring_plot:
+                            plots[1] = gr.Plot(scoring_plot)
+                        
+                        return df, recommendations, *plots
+                        
+                    except Exception as e:
+                        logger.error(f"Erreur lors du traitement OptimisationAssurance: {e}")
+                        logger.exception("Détails de l'erreur:")
+                        return pd.DataFrame(), f"Erreur: {str(e)}", *empty_plots
+                        
                 if service == "BusinessSecurity":
                     plots = empty_plots
                     
@@ -52,7 +78,7 @@ class SecurityService:
                         plots[1] = gr.Plot(zone_fig)
                     
                     return (df, recommendations, *plots)
-                if service == "AlerteVoisinage+":
+                if service == "AlerteVoisinage":
                     plots = empty_plots
                     
                     # Debug
@@ -163,21 +189,23 @@ class SecurityService:
         year: int,
         department_dest: str = None,
         month: str = None,
-        crime_type: str = None,  # Gardé pour compatibilité avec les autres services
+        crime_type: str = None,  
         radius: int = None
     ) -> Tuple[pd.DataFrame, str]:
         """Get the service specific data"""
         try:
+            logger.info(f"Exécution de _get_service_data pour {service}")
             if service == "TransportSécurité":
                 return self._transport_security(department, department_dest, year, month)
             elif service == "Sécurité Immobilière":
+                logger.info(f"Exécution de _real_estate_security pour dept={department}")
                 return self._real_estate_security(department, year)
-            elif service == "AlerteVoisinage+":
+            elif service == "AlerteVoisinage":
                 return self._neighborhood_alert(department, year, radius)
             elif service == "BusinessSecurity":
                 # Pour BusinessSecurity, on ignore les paramètres supplémentaires
                 return self._business_security(department, year)
-            elif service == "OptimAssurance":
+            elif service == "OptimisationAssurance":
                 return self._insurance_optimization(department, year)
             else:
                 logger.warning(f"Service non reconnu: {service}")
@@ -254,6 +282,7 @@ class SecurityService:
         
         try:
             df = self.db.execute_query(query, (department, year))
+            logger.info(f"Données récupérées: {len(df)} lignes")
             recommendations = self._generate_real_estate_recommendations(df)
             return df, recommendations
         except Exception as e:

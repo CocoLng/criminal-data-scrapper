@@ -4,7 +4,6 @@ import pandas as pd
 import numpy as np
 import logging
 import gradio as gr
-import plotly.express as px
 
 logger = logging.getLogger(__name__)
 
@@ -345,7 +344,7 @@ class SecurityVisualization:
             logger.error(f"Erreur lors de la création de la distribution des risques: {str(e)}")
             return None
         
-        ### PASSAGE A AlerteVoisinage+ ###
+        ### PASSAGE A AlerteVoisinage ###
     def create_alert_heatmap(self, df: pd.DataFrame) -> Optional[go.Figure]:
         """Crée une heatmap des niveaux d'alerte par type de crime"""
         try:
@@ -779,4 +778,173 @@ class SecurityVisualization:
         except Exception as e:
             logger.error(f"Erreur lors de la création de l'évaluation des zones: {str(e)}")
             logger.exception("Détails complets de l'erreur:")
+            return None
+  
+    ### PASSAGE A OptimisationAssurance ###
+    def create_insurance_risk_heatmap(self, df: pd.DataFrame) -> Optional[go.Figure]:
+        """Crée une heatmap des risques pour les assurances"""
+        try:
+            required_columns = ['type_crime', 'quintile_risque', 'score_assurance']
+            if not self._validate_dataframe(df, required_columns):
+                return None
+            
+            # Préparation des données
+            pivot_data = pd.pivot_table(
+                df,
+                values='score_assurance',
+                index='type_crime',
+                columns='quintile_risque',
+                aggfunc='mean'
+            ).round(2)
+            
+            # Création de la heatmap
+            fig = go.Figure(data=go.Heatmap(
+                z=pivot_data.values,
+                x=['Très faible', 'Faible', 'Moyen', 'Élevé', 'Très élevé'],
+                y=pivot_data.index,
+                colorscale=[
+                    [0, '#198754'],    # Vert - Risque faible
+                    [0.25, '#90EE90'],  # Vert clair
+                    [0.5, '#ffc107'],   # Jaune
+                    [0.75, '#fd7e14'],  # Orange
+                    [1, '#dc3545']      # Rouge - Risque élevé
+                ],
+                hoverongaps=False,
+                hovertemplate=(
+                    "<b>%{y}</b><br>" +
+                    "Niveau de risque: %{x}<br>" +
+                    "Score de risque: %{z:.2f}<br>" +
+                    "<extra></extra>"
+                )
+            ))
+            
+            fig.update_layout(
+                title={
+                    'text': "Matrice de risque par type de délit",
+                    'y': 0.95,
+                    'x': 0.5,
+                    'xanchor': 'center',
+                    'yanchor': 'top'
+                },
+                xaxis_title="Niveau de risque",
+                yaxis_title="Type de délit",
+                height=500,
+                margin=dict(l=50, r=50, t=100, b=100)
+            )
+            
+            # Ajout d'une annotation explicative
+            fig.add_annotation(
+                text=(
+                    "Guide de lecture :<br>" +
+                    "• Plus la couleur tend vers le rouge, plus le risque est élevé<br>" +
+                    "• Score de risque basé sur la fréquence et la gravité des délits"
+                ),
+                xref="paper", yref="paper",
+                x=-1.5, y=-0.2,
+                showarrow=False,
+                font=dict(size=12),
+                align="left",
+                bgcolor="rgba(255, 255, 255, 0.8)",
+                bordercolor="black",
+                borderwidth=1
+            )
+            
+            return fig
+        except Exception as e:
+            logger.error(f"Erreur lors de la création de la heatmap: {str(e)}")
+            return None
+
+    def create_insurance_scoring(self, df: pd.DataFrame) -> Optional[go.Figure]:
+        """Crée un graphique de scoring pour l'ajustement des primes"""
+        try:
+            required_columns = ['type_crime', 'quintile_risque', 'indice_relatif']
+            if not self._validate_dataframe(df, required_columns):
+                return None
+            
+            # Création des catégories de risque avec impact sur les primes
+            risk_categories = {
+                1: 'Prime réduite (-20%)',
+                2: 'Prime réduite (-10%)',
+                3: 'Prime standard',
+                4: 'Prime majorée (+10%)',
+                5: 'Prime majorée (+20%)'
+            }
+            
+            # Préparation des données
+            df_scoring = df.copy()
+            df_scoring['ajustement_prime'] = df_scoring['quintile_risque'].map(risk_categories)
+            
+            # Création du scatter plot
+            fig = go.Figure()
+            
+            # Ajout d'une ligne de référence pour la moyenne nationale
+            fig.add_hline(
+                y=100, 
+                line_dash="dash",
+                line_color="gray",
+                annotation_text="Moyenne nationale",
+                annotation_position="right"
+            )
+            
+            # Définition des couleurs par niveau de prime
+            colors = {
+                'Prime réduite (-20%)': '#198754',
+                'Prime réduite (-10%)': '#90EE90',
+                'Prime standard': '#ffc107',
+                'Prime majorée (+10%)': '#fd7e14',
+                'Prime majorée (+20%)': '#dc3545'
+            }
+            
+            # Ajout des points pour chaque niveau de prime
+            for prime_cat in risk_categories.values():
+                mask = df_scoring['ajustement_prime'] == prime_cat
+                fig.add_trace(go.Scatter(
+                    x=df_scoring[mask]['type_crime'],
+                    y=df_scoring[mask]['indice_relatif'],
+                    mode='markers',
+                    name=prime_cat,
+                    marker=dict(
+                        size=15,
+                        color=colors[prime_cat],
+                        symbol='circle'
+                    ),
+                    hovertemplate=(
+                        "<b>%{x}</b><br>" +
+                        "Indice de risque: %{y:.1f}%<br>" +
+                        f"Ajustement: {prime_cat}<br>" +
+                        "<extra></extra>"
+                    )
+                ))
+            
+            fig.update_layout(
+                title={
+                    'text': "Scoring territorial et ajustement des primes",
+                    'y': 0.95,
+                    'x': 0.5,
+                    'xanchor': 'center',
+                    'yanchor': 'top'
+                },
+                xaxis_title="Type de délit",
+                yaxis_title="Indice de risque (%)",
+                height=500,
+                showlegend=True,
+                legend=dict(
+                    title="Recommandation tarifaire",
+                    yanchor="top",
+                    y=0.95,
+                    xanchor="left",
+                    x=1.15,
+                    bgcolor="rgba(255, 255, 255, 0.8)",
+                    bordercolor="black",
+                    borderwidth=1
+                ),
+                margin=dict(l=50, r=150, t=100, b=100)
+            )
+            
+            # Rotation des labels sur l'axe x
+            fig.update_xaxes(tickangle=45)
+            
+            return fig
+        except Exception as e:
+            logger.error(f"Erreur lors de la création du scoring: {str(e)}")
             return None
