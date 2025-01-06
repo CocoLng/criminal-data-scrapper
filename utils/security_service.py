@@ -1,13 +1,16 @@
 import pandas as pd
-from typing import Tuple
+from typing import Tuple, List
 from database.database import DatabaseConnection
+from view.security_view import SecurityVisualization
 import logging
+import gradio as gr
 
 logger = logging.getLogger(__name__)
 
 class SecurityService:
     def __init__(self):
         self.db = DatabaseConnection()
+        self.visualizer = SecurityVisualization()
 
     def process_request(
         self,
@@ -15,75 +18,155 @@ class SecurityService:
         department: str,
         year: int,
         department_dest: str = None,
-        month: int = None,
+        month: str = None,
+        crime_type: str = None,
+        radius: int = None
+    ) -> Tuple[pd.DataFrame, str, gr.Plot, gr.Plot, gr.Plot, gr.Plot]:
+        """
+        Traite les demandes de service de sécurité
+        Returns:
+            Tuple[pd.DataFrame, str, gr.Plot, gr.Plot, gr.Plot, gr.Plot]: 
+            (données, recommandations, plot1, plot2, plot3, plot4)
+        """
+        try:
+            # Initialisation des plots vides
+            empty_plots = [None] * 4
+            
+            # Obtenir les données et recommandations
+            df, recommendations = self._get_service_data(
+                service, department, year, department_dest, month, crime_type, radius
+            )
+            
+            if df.empty:
+                return (df, "Aucune donnée disponible", *empty_plots)
+                
+            # Générer les visualisations
+            try:
+                if service == "Sécurité Immobilière":
+                    figures = self.visualizer.generate_security_visualizations(df)
+                    # S'assurer d'avoir exactement 4 figures
+                    plots = [gr.Plot(fig) if fig else None for fig in (figures + empty_plots)[:4]]
+                    return (df, recommendations, *plots)
+                
+                elif service == "AlerteVoisinage+":
+                    plots = empty_plots
+                    heatmap = self.visualizer.create_risk_heatmap(df)
+                    trend = self.visualizer.create_trend_analysis(df)
+                    
+                    if heatmap:
+                        plots[0] = gr.Plot(heatmap)
+                    if trend:
+                        plots[1] = gr.Plot(trend)
+                    
+                    return (df, recommendations, *plots)
+                
+                return (df, recommendations, *empty_plots)
+            
+            except Exception as viz_error:
+                logger.error(f"Erreur lors de la génération des visualisations: {viz_error}")
+                return (df, recommendations, *empty_plots)
+            
+        except Exception as e:
+            logger.error(f"Erreur dans process_request: {str(e)}")
+            return (pd.DataFrame(), f"Erreur: {str(e)}", *empty_plots)
+
+    def _get_service_data(
+        self,
+        service: str,
+        department: str,
+        year: int,
+        department_dest: str = None,
+        month: str = None,
         crime_type: str = None,
         radius: int = None
     ) -> Tuple[pd.DataFrame, str]:
-        """Process security service requests with input validation"""
-        try:
-            if service == "TransportSécurité":
-                if not all([department, department_dest, year, month]):
-                    return pd.DataFrame(), "Paramètres manquants pour l'analyse de transport"
-                return self._transport_security(department, department_dest, year, month)
-            elif service == "Sécurité Immobilière":
-                return self._real_estate_security(department, year)
-            elif service == "AlerteVoisinage+":
-                return self._neighborhood_alert(department, year, radius)
-            elif service == "BusinessSecurity":
-                return self._business_security(department, year, crime_type)
-            elif service == "OptimAssurance":
-                return self._insurance_optimization(department, year)
-            else:
-                return pd.DataFrame(), "Service non reconnu"
-        except Exception as e:
-            logger.error(f"Error in SecurityService: {e}")
-            return pd.DataFrame(), f"Erreur: {str(e)}"
+        """Get the service specific data"""
+        if service == "TransportSécurité":
+            return self._transport_security(department, department_dest, year, month)
+        elif service == "Sécurité Immobilière":
+            return self._real_estate_security(department, year)
+        elif service == "AlerteVoisinage+":
+            return self._neighborhood_alert(department, year, radius)
+        elif service == "BusinessSecurity":
+            return self._business_security(department, year, crime_type)
+        elif service == "OptimAssurance":
+            return self._insurance_optimization(department, year)
+        else:
+            return pd.DataFrame(), "Service non reconnu"
 
     def _real_estate_security(self, department: str, year: int) -> Tuple[pd.DataFrame, str]:
-        """Analyze real estate security metrics"""
+        """Analyse les métriques de sécurité immobilière"""
         query = """
-        WITH CrimeStats AS (
+        WITH 
+        -- Statistiques mensuelles nationales
+        NationalStats AS (
             SELECT 
-                d.code_departement,
                 c.type_crime,
-                c.nombre_faits,
-                d.logements,
-                d.population,
-                CAST(c.nombre_faits AS DECIMAL(10,4)) / NULLIF(d.logements, 0) as ratio_crime_logement,
-                CAST(c.nombre_faits AS DECIMAL(10,4)) / NULLIF(d.population, 0) * 1000 as taux_population
+                c.annee,
+                SUM(c.nombre_faits) as total_faits_national,
+                SUM(d.population) as total_population_national,
+                CAST(SUM(c.nombre_faits) * 1000.0 AS DECIMAL(10,2)) / NULLIF(SUM(d.population), 0) as taux_national
             FROM crimes c
             JOIN statistiques s ON c.id_crime = s.id_crime
             JOIN departements d ON s.code_departement = d.code_departement
-            WHERE d.code_departement = %s AND c.annee = %s
+            GROUP BY c.type_crime, c.annee
         ),
+        -- Statistiques mensuelles du département
+        DepartmentStats AS (
+            SELECT 
+                d.code_departement,
+                c.type_crime,
+                c.annee,
+                c.nombre_faits,
+                d.population,
+                CAST(c.nombre_faits * 1000.0 AS DECIMAL(10,2)) / NULLIF(d.population, 0) as taux_dept
+            FROM crimes c
+            JOIN statistiques s ON c.id_crime = s.id_crime
+            JOIN departements d ON s.code_departement = d.code_departement
+            WHERE d.code_departement = %s
+            AND c.annee = %s
+        ),
+        -- Score de sécurité relatif
         SecurityScore AS (
             SELECT
-                code_departement,
-                ROUND(AVG(ratio_crime_logement), 4) as score_logement,
-                ROUND(AVG(taux_population), 2) as score_population,
-                COUNT(DISTINCT type_crime) as nb_types_crimes,
-                SUM(nombre_faits) as total_faits
-            FROM CrimeStats
-            GROUP BY code_departement
+                h.code_departement,
+                h.type_crime,
+                h.annee,
+                h.nombre_faits,
+                h.population,
+                h.taux_dept,
+                n.taux_national,
+                -- Normalisation du score de sécurité
+                CASE 
+                    WHEN n.taux_national = 0 THEN 0
+                    ELSE (
+                        (n.taux_national - h.taux_dept) / 
+                        GREATEST(n.taux_national, 0.001) * 100.0
+                    )
+                END as score_securite
+            FROM DepartmentStats h
+            JOIN NationalStats n ON h.type_crime = n.type_crime 
+                AND h.annee = n.annee 
         )
         SELECT 
-            cs.*,
-            ss.score_logement,
-            ss.score_population,
+            *,
             CASE 
-                WHEN ss.score_logement > 0.1 THEN 'ÉLEVÉ'
-                WHEN ss.score_logement > 0.05 THEN 'MODÉRÉ'
+                WHEN score_securite < -20 THEN 'ÉLEVÉ'
+                WHEN score_securite < 20 THEN 'MODÉRÉ'
                 ELSE 'FAIBLE'
             END as niveau_risque
-        FROM CrimeStats cs
-        JOIN SecurityScore ss USING (code_departement)
-        ORDER BY cs.ratio_crime_logement DESC;
+        FROM SecurityScore
+        ORDER BY type_crime;
         """
         
-        df = self.db.execute_query(query, (department, year))
-        recommendations = self._generate_real_estate_recommendations(df)
-        return df, recommendations
-
+        try:
+            df = self.db.execute_query(query, (department, year))
+            recommendations = self._generate_real_estate_recommendations(df)
+            return df, recommendations
+        except Exception as e:
+            logger.error(f"Erreur lors de l'analyse immobilière: {str(e)}")
+            return pd.DataFrame(), "Erreur lors de l'analyse des données immobilières"
+    
     def _neighborhood_alert(self, department: str, year: int, radius: int) -> Tuple[pd.DataFrame, str]:
         """Generate neighborhood alerts and risk analysis"""
         query = """
@@ -291,30 +374,41 @@ class SecurityService:
         return df, recommendations
 
     def _generate_real_estate_recommendations(self, df: pd.DataFrame) -> str:
-        """Generate enhanced real estate security recommendations"""
+        """Génère des recommandations pour la sécurité immobilière"""
         if df.empty:
             return "Aucune donnée disponible pour générer des recommandations"
-            
-        avg_score = df['score_logement'].mean()
-        risk_level = df['niveau_risque'].iloc[0]
+                
+        # Calcul du score moyen (100 = moyenne nationale)
+        score_moyen = df['score_securite'].mean()
+        
+        # Détermination du niveau de risque global
+        if score_moyen < -20:
+            niveau_risque = "ÉLEVÉ"
+        elif score_moyen < 20:
+            niveau_risque = "MODÉRÉ"
+        else:
+            niveau_risque = "FAIBLE"
         
         recommendations = [
             f"🏘️ Analyse de sécurité immobilière :",
-            f"\nNiveau de risque global: {risk_level}",
-            f"Score moyen de sécurité: {avg_score:.4f}"
+            f"\nNiveau de risque global: {niveau_risque}",
+            f"Score de sécurité: {score_moyen:.1f} (0 = moyenne nationale)"
         ]
         
         # Analyse détaillée par type de crime
         recommendations.append("\nAnalyse détaillée :")
-        for _, row in df.iterrows():
-            crime_ratio = row['ratio_crime_logement']
+        current_year_data = df[df['annee'] == df['annee'].max()]
+        for _, row in current_year_data.iterrows():
+            score = row['score_securite']
+            signe = "+" if score > 0 else ""
             recommendations.append(
-                f"- {row['type_crime']}: {crime_ratio:.4f} incidents/logement"
+                f"- {row['type_crime']}: {signe}{score:.1f} vs moyenne nationale "
+                f"({row['nombre_faits']} incidents)"
             )
         
         # Recommandations spécifiques selon le niveau de risque
         recommendations.append("\nRecommandations :")
-        if risk_level == 'ÉLEVÉ':
+        if niveau_risque == 'ÉLEVÉ':
             recommendations.extend([
                 "⚠️ Zone nécessitant des mesures de sécurité renforcées :",
                 "• Installation de systèmes de sécurité avancés recommandée",
@@ -322,7 +416,7 @@ class SecurityService:
                 "• Audit de sécurité détaillé avant acquisition",
                 "• Souscription à une assurance renforcée à envisager"
             ])
-        elif risk_level == 'MODÉRÉ':
+        elif niveau_risque == 'MODÉRÉ':
             recommendations.extend([
                 "⚠️ Vigilance recommandée :",
                 "• Mesures de sécurité standards conseillées",
@@ -336,7 +430,18 @@ class SecurityService:
                 "• Surveillance collaborative du voisinage",
                 "• Possibilité de réduction sur les assurances"
             ])
-                
+        
+        # Ajout des points d'attention pour les scores très différents de la moyenne
+        significant_changes = df[abs(df['score_securite']) > 30]
+        if not significant_changes.empty:
+            recommendations.append("\nPoints d'attention particuliers :")
+            for _, change in significant_changes.iterrows():
+                signe = "+" if change['score_securite'] > 0 else ""
+                recommendations.append(
+                    f"• {change['type_crime']}: {signe}{change['score_securite']:.1f} "
+                    f"par rapport à la moyenne nationale"
+                )
+                    
         return "\n".join(recommendations)
 
     def _generate_alert_recommendations(self, df: pd.DataFrame) -> str:

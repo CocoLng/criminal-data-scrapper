@@ -292,66 +292,95 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                 advanced_button = gr.Button("Exécuter")
 
             # Zone de résultats commune au onglets
-            with gr.Row():
-                insights = gr.TextArea(label="Analyse et Recommandations", lines=3)
-            with gr.Row():
-                output_df = gr.DataFrame(label="Résultats")
-
-        # Event handlers for service buttons
-        def process_security_request(service, dept, dept_dest, year, crime_type, radius, month):
-            """Process security requests with proper parameter handling"""
-            try:
-                if service == "TransportSécurité":
-                    if not all([dept, dept_dest, year, month]):
-                        return pd.DataFrame(), "Veuillez remplir tous les champs requis"
-                        
-                    # Conversion explicite des types
-                    year_int = int(year) if year else None
-                    month_int = int(month) if month else None
-                    
-                    return interface_manager.security_service.process_request(
-                        service=service,
-                        department=dept,
-                        department_dest=dept_dest,
-                        year=year_int,
-                        month=month_int
-                    )
-                else:
-                    if not all([dept, year]):
-                        return pd.DataFrame(), "Veuillez remplir tous les champs requis"
-                        
-                    return interface_manager.security_service.process_request(
-                        service=service,
-                        department=dept,
-                        year=int(year) if year else None,
-                        crime_type=crime_type,
-                        radius=int(radius) if radius else None
-                    )
-            except Exception as e:
-                print(f"ERROR in process_security_request: {str(e)}")
-                return pd.DataFrame(), f"Erreur lors du traitement de la requête: {str(e)}"
-
-        
-        security_button.click(
-            process_security_request,
-            inputs=[
-                security_service,
-                dept_security,
-                dept_security_dest,
-                year_security,
-                crime_type_security,
-                radius_security,
-                month_security
-            ],
-            outputs=[output_df, insights]
-        )
+            with gr.Column():
+                gr.Markdown("## Visualisations")
+                with gr.Row():
+                    plot1 = gr.Plot(label="Score de sécurité")
+                    plot2 = gr.Plot(label="Distribution des risques")
+                with gr.Row():
+                    plot3 = gr.Plot(label="Évolution temporelle")
+                    plot4 = gr.Plot(label="Analyse comparative")
                 
-        # Event handlers for service buttons
-        security_button.click(
-            interface_manager.security_service.process_request,
-            inputs=[security_service, dept_security, year_security, crime_type_security, radius_security],
-            outputs=[output_df, insights]
-        )
+                gr.Markdown("## Analyse et Recommandations")
+                insights = gr.Textbox(lines=3)
+                
+                gr.Markdown("## Résultats détaillés")
+                output_df = gr.DataFrame(label="Résultats", interactive=False)
+
+            # Fonction pour gérer la visibilité des champs
+            def update_security_fields(service):
+                if service == "TransportSécurité":
+                    return {
+                        dept_security: gr.update(visible=True, label="Département de départ"),
+                        dept_security_dest: gr.update(visible=True),
+                        year_security: gr.update(visible=True),
+                        month_security: gr.update(visible=True),
+                        crime_type_security: gr.update(visible=False),
+                        radius_security: gr.update(visible=False)
+                    }
+                elif service == "AlerteVoisinage+":
+                    return {
+                        dept_security: gr.update(visible=True, label="Département"),
+                        dept_security_dest: gr.update(visible=False),
+                        year_security: gr.update(visible=True),
+                        month_security: gr.update(visible=False),
+                        crime_type_security: gr.update(visible=False),
+                        radius_security: gr.update(visible=True)
+                    }
+                elif service == "BusinessSecurity":
+                    return {
+                        dept_security: gr.update(visible=True, label="Département"),
+                        dept_security_dest: gr.update(visible=False),
+                        year_security: gr.update(visible=True),
+                        month_security: gr.update(visible=False),
+                        crime_type_security: gr.update(visible=True),
+                        radius_security: gr.update(visible=False)
+                    }
+                else:
+                    return {
+                        dept_security: gr.update(visible=True, label="Département"),
+                        dept_security_dest: gr.update(visible=False),
+                        year_security: gr.update(visible=True),
+                        month_security: gr.update(visible=False),
+                        crime_type_security: gr.update(visible=False),
+                        radius_security: gr.update(visible=False)
+                    }
+
+            # Event handlers
+            security_service.change(
+                fn=update_security_fields,
+                inputs=[security_service],
+                outputs=[
+                    dept_security,
+                    dept_security_dest,
+                    year_security,
+                    month_security,
+                    crime_type_security,
+                    radius_security
+                ]
+            )
+
+            # Connexion du bouton d'analyse
+            security_button.click(
+                fn=interface_manager.security_service.process_request,
+                inputs=[
+                    security_service,
+                    dept_security,
+                    year_security,
+                    dept_security_dest,
+                    month_security,
+                    crime_type_security,
+                    radius_security
+                ],
+                outputs=[
+                    output_df,
+                    insights,
+                    plot1,
+                    plot2,
+                    plot3,
+                    plot4
+                ]
+            )
         
         territorial_button.click(
             interface_manager.territorial_service.process_request,
