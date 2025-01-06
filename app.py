@@ -1,10 +1,13 @@
 import logging
 import gradio as gr
 import pandas as pd
-from typing import Tuple, Any, Dict, List
+from typing import Tuple
 
 from database.database import DatabaseConnection
 from utils.queries import QueryBuilder
+from utils.security_service import SecurityService
+from utils.territorial_service import TerritorialService
+from utils.predictive_service import PredictiveService
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +15,9 @@ class InterfaceManager:
     def __init__(self):
         self.db = DatabaseConnection()
         self.query_builder = QueryBuilder()
+        self.security_service = SecurityService()
+        self.territorial_service = TerritorialService()
+        self.predictive_service = PredictiveService()
         self._load_initial_values()
 
     def _load_initial_values(self):
@@ -74,24 +80,121 @@ class InterfaceManager:
         except Exception as e:
             logger.error(f"Error executing custom query: {e}")
             return pd.DataFrame(), f"Erreur: {str(e)}"
+        
+    def execute_service(self, category: str, service: str, **params) -> Tuple[pd.DataFrame, str]:
+        """Execute a service analysis"""
+        return self.service_manager.execute_service(category, service, params)
 
 def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=7860):
-    """Create and launch the Gradio interface"""
-    
     interface_manager = InterfaceManager()
     
-    # Create interface
     with gr.Blocks(title="Analyse de la Délinquance") as interface:
         gr.Markdown("# Interface d'analyse de la délinquance")
         
         with gr.Tabs():
-            # Simple Query Tab
+            # Onglet Sécurité
+            with gr.Tab("Sécurité"):
+                with gr.Row():
+                    security_service = gr.Dropdown(
+                        choices=[
+                            "Sécurité Immobilière",
+                            "AlerteVoisinage+",
+                            "BusinessSecurity",
+                            "OptimAssurance",
+                            "TransportSécurité"
+                        ],
+                        label="Service de sécurité"
+                    )
+                
+                with gr.Row():
+                    dept_security = gr.Dropdown(
+                        choices=interface_manager.departements,
+                        label="Département"
+                    )
+                    year_security = gr.Dropdown(
+                        choices=interface_manager.annees,
+                        label="Année"
+                    )
+                    
+                with gr.Row():
+                    crime_type_security = gr.Dropdown(
+                        choices=interface_manager.types_crimes,
+                        label="Type de crime",
+                        visible=False
+                    )
+                    radius_security = gr.Slider(
+                        minimum=1,
+                        maximum=10,
+                        value=5,
+                        label="Rayon d'analyse (km)",
+                        visible=False
+                    )
+                
+                security_button = gr.Button("Analyser")
+
+            # Onglet Analyse Territoriale
+            with gr.Tab("Analyse Territoriale"):
+                with gr.Row():
+                    territorial_service = gr.Dropdown(
+                        choices=[
+                            "Diagnostic Territorial",
+                            "Impact Événementiel",
+                            "UrbanSafe"
+                        ],
+                        label="Service d'analyse territoriale"
+                    )
+                
+                with gr.Row():
+                    dept_territorial = gr.Dropdown(
+                        choices=interface_manager.departements,
+                        label="Département de référence"
+                    )
+                    compare_type = gr.Dropdown(
+                        choices=[
+                            "Population similaire",
+                            "Même région",
+                            "Départements limitrophes"
+                        ],
+                        label="Type de comparaison"
+                    )
+                
+                territorial_button = gr.Button("Analyser")
+
+            # Onglet Prédiction
+            with gr.Tab("Prédiction"):
+                with gr.Row():
+                    prediction_service = gr.Dropdown(
+                        choices=[
+                            "Prévision Saisonnière",
+                            "PolicePrédictive"
+                        ],
+                        label="Service de prédiction"
+                    )
+                
+                with gr.Row():
+                    crime_type_pred = gr.Dropdown(
+                        choices=interface_manager.types_crimes,
+                        label="Type de crime"
+                    )
+                    dept_pred = gr.Dropdown(
+                        choices=interface_manager.departements,
+                        label="Département"
+                    )
+                    
+                with gr.Row():
+                    horizon_pred = gr.Dropdown(
+                        choices=["1 mois", "3 mois", "6 mois", "1 an"],
+                        label="Horizon de prédiction"
+                    )
+                
+                prediction_button = gr.Button("Prédire")
+
+            # Onglet Requêtes simples (existant)
             with gr.Tab("Requêtes simples"):
                 with gr.Row():
                     query_dropdown = gr.Dropdown(
                         choices=list(QueryBuilder.get_predefined_queries().keys()),
-                        label="Type d'analyse",
-                        info="Sélectionnez le type d'analyse souhaité"
+                        label="Type d'analyse"
                     )
                 
                 with gr.Row():
@@ -111,33 +214,9 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                         visible=True
                     )
                 
-                def update_param_visibility(query_name):
-                    """Update parameter visibility based on selected query"""
-                    if not query_name:
-                        return {
-                            type_crime: gr.update(visible=False),
-                            annee: gr.update(visible=False),
-                            code_departement: gr.update(visible=False)
-                        }
-                    
-                    query_info = QueryBuilder.get_predefined_queries()[query_name]
-                    params = query_info["params"]
-                    
-                    return {
-                        type_crime: gr.update(visible="type_crime" in params),
-                        annee: gr.update(visible="annee" in params),
-                        code_departement: gr.update(visible="code_departement" in params)
-                    }
-                
-                query_dropdown.change(
-                    update_param_visibility,
-                    inputs=[query_dropdown],
-                    outputs=[type_crime, annee, code_departement]
-                )
-                
                 query_button = gr.Button("Exécuter")
-                
-            # Advanced Query Tab
+
+            # Onglet Requêtes avancées (existant)
             with gr.Tab("Requêtes avancées"):
                 custom_query = gr.Textbox(
                     lines=5,
@@ -145,26 +224,46 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                     label="Requête SQL personnalisée"
                 )
                 advanced_button = gr.Button("Exécuter")
-            
-            # Results area (shared between tabs)
-            output_df = gr.DataFrame(label="Résultats")
-            message = gr.Textbox(label="Messages")
+
+            # Zone de résultats commune au onglets
+            with gr.Row():
+                insights = gr.TextArea(label="Analyse et Recommandations", lines=3)
+            with gr.Row():
+                output_df = gr.DataFrame(label="Résultats")
+                
+        # Event handlers for service buttons
+        security_button.click(
+            interface_manager.security_service.process_request,
+            inputs=[security_service, dept_security, year_security, crime_type_security, radius_security],
+            outputs=[output_df, insights]
+        )
         
-        # Set up event handlers
+        territorial_button.click(
+            interface_manager.territorial_service.process_request,
+            inputs=[territorial_service, dept_territorial, compare_type],
+            outputs=[output_df, insights]
+        )
+        
+        prediction_button.click(
+            interface_manager.predictive_service.process_request,
+            inputs=[prediction_service, crime_type_pred, dept_pred, horizon_pred],
+            outputs=[output_df, insights]
+        )
+        
+        # Event handlers for query buttons (existing)
         query_button.click(
             interface_manager.execute_predefined_query,
             inputs=[query_dropdown, type_crime, annee, code_departement],
-            outputs=[output_df, message]
+            outputs=[output_df, insights]
         )
         
         advanced_button.click(
             interface_manager.execute_custom_query,
             inputs=[custom_query],
-            outputs=[output_df, message]
+            outputs=[output_df, insights]
         )
-    
-    # Launch the interface
-    interface.launch(
+
+    return interface.launch(
         share=share,
         server_name=server_name,
         server_port=server_port

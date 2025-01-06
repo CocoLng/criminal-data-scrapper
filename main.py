@@ -18,7 +18,7 @@ logger = logging.getLogger("main")
 def main():
     try:
         logger.info("Démarrage de l'application")
-        # Initialize database and load data
+        # Initialisation de la base de données
         db_init = DatabaseInitializer()
         db_init.create_database()
 
@@ -27,7 +27,7 @@ def main():
         server_name = "0.0.0.0"
         server_port = 7860
 
-        # Start the application
+        # Création et lancement de l'interface
         create_and_launch_interface(
             share=share, server_name=server_name, server_port=server_port
         )
