@@ -123,6 +123,7 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                     dept_security_dest = gr.Dropdown(
                         choices=interface_manager.departements,
                         label="Département de destination",
+                        value="13",
                         visible=False,
                     )
                     year_security = gr.Dropdown(
@@ -154,7 +155,7 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                         return {
                             dept_security: gr.update(visible=True, label="Département de départ"),
                             dept_security_dest: gr.update(visible=True),
-                            year_security: gr.update(visible=True),
+                            year_security: gr.update(visible=False),
                             crime_type_security: gr.update(visible=False),
                             radius_security: gr.update(visible=False)
                         }

@@ -37,6 +37,20 @@ class SecurityService:
                 return (df, "Aucune donnée disponible", *empty_plots)
                 
             try:
+                if service == "TransportSécurité":
+                    plots = empty_plots
+                    
+                    # Création du radar des risques
+                    risk_radar = self.visualizer.create_transport_risk_radar(df)
+                    if risk_radar is not None:
+                        plots[0] = gr.Plot(risk_radar)
+                    
+                    # Création de la timeline des incidents
+                    timeline = self.visualizer.create_transport_timeline(df)
+                    if timeline is not None:
+                        plots[1] = gr.Plot(timeline)
+                    
+                    return (df, recommendations, *plots)
                 if service == "OptimisationAssurance":
                     try:
                         # Récupération des données
@@ -188,7 +202,6 @@ class SecurityService:
         department: str,
         year: int,
         department_dest: str = None,
-        month: str = None,
         crime_type: str = None,  
         radius: int = None
     ) -> Tuple[pd.DataFrame, str]:
@@ -196,7 +209,7 @@ class SecurityService:
         try:
             logger.info(f"Exécution de _get_service_data pour {service}")
             if service == "TransportSécurité":
-                return self._transport_security(department, department_dest, year, month)
+                return self._transport_security(department, department_dest)
             elif service == "Sécurité Immobilière":
                 logger.info(f"Exécution de _real_estate_security pour dept={department}")
                 return self._real_estate_security(department, year)
@@ -456,86 +469,156 @@ class SecurityService:
     def _transport_security(
         self, 
         dept_depart: str, 
-        dept_arrivee: str, 
-        annee: int, 
-        mois: int
+        dept_arrivee: str
     ) -> Tuple[pd.DataFrame, str]:
-        """Analyze transport security risks between two departments with validation"""
+        """
+        Analyze transport security risks between two departments across all years
+        
+        Args:
+            dept_depart (str): Code du département de départ
+            dept_arrivee (str): Code du département d'arrivée
+            
+        Returns:
+            Tuple[pd.DataFrame, str]: DataFrame avec les statistiques et message de recommandation
+        """
+        
         # Validation des entrées
-        if not all([dept_depart, dept_arrivee, annee, mois]):
-            return pd.DataFrame(), "Données manquantes pour l'analyse"
-            
-        if dept_depart not in self.db.get_distinct_values("departements", "code_departement"):
-            return pd.DataFrame(), f"Département de départ invalide: {dept_depart}"
-            
-        if dept_arrivee not in self.db.get_distinct_values("departements", "code_departement"):
-            return pd.DataFrame(), f"Département d'arrivée invalide: {dept_arrivee}"
-            
+        if not dept_depart or not dept_arrivee:
+            return pd.DataFrame(), "Départements de départ et d'arrivée requis"
+                
         query = """
-        WITH TransportCrimes AS (
-            -- Sélection des crimes pertinents pour les deux départements
+        WITH TransportStats AS (
             SELECT 
                 d.code_departement,
                 c.type_crime,
                 c.annee,
-                EXTRACT(MONTH FROM DATE(CONCAT(c.annee, '-01-01'))) as mois,
                 c.nombre_faits,
-                d.population,
-                -- Calcul du taux pour 100 000 habitants pour normalisation
-                ROUND(CAST(c.nombre_faits AS DECIMAL(10,2)) / d.population * 100000, 2) as taux_100k,
-                -- Moyenne mobile sur 3 mois pour voir les tendances
-                AVG(c.nombre_faits) OVER (
-                    PARTITION BY d.code_departement, c.type_crime 
-                    ORDER BY c.annee, EXTRACT(MONTH FROM DATE(CONCAT(c.annee, '-01-01')))
+                s.taux_pour_mille,
+                -- Conversion en taux pour 100k habitants
+                s.taux_pour_mille * 100 as taux_100k,
+                -- Moyenne mobile sur 3 ans du taux
+                AVG(s.taux_pour_mille) OVER (
+                    PARTITION BY d.code_departement, c.type_crime
+                    ORDER BY c.annee
                     ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
-                ) as moyenne_mobile
+                ) as moyenne_mobile_taux,
+                -- Taux année précédente
+                LAG(s.taux_pour_mille) OVER (
+                    PARTITION BY d.code_departement, c.type_crime
+                    ORDER BY c.annee
+                ) as taux_annee_precedente,
+                -- Rang basé sur le taux
+                RANK() OVER (
+                    PARTITION BY d.code_departement, c.type_crime
+                    ORDER BY s.taux_pour_mille DESC
+                ) as rang_taux
             FROM crimes c
             JOIN statistiques s ON c.id_crime = s.id_crime
             JOIN departements d ON s.code_departement = d.code_departement
             WHERE d.code_departement IN (%s, %s)
-            AND c.annee = %s
-            AND EXTRACT(MONTH FROM DATE(CONCAT(c.annee, '-01-01'))) = %s
             AND c.type_crime IN (
                 'Vols avec armes',
                 'Vols violents sans arme',
-                'Vols sans violence contre des personnes',
                 'Vols dans les véhicules',
                 'Vols de véhicules',
                 'Vols d''accessoires sur véhicules',
                 'Destructions et dégradations volontaires'
             )
-        ),
-        RiskAnalysis AS (
-            SELECT 
-                *,
-                -- Calcul du niveau de risque basé sur le taux pour 100k habitants
-                CASE 
-                    WHEN taux_100k >= 50 THEN 'RISQUE ÉLEVÉ'
-                    WHEN taux_100k >= 25 THEN 'RISQUE MODÉRÉ'
-                    ELSE 'RISQUE FAIBLE'
-                END as niveau_risque,
-                -- Tendance par rapport à la moyenne mobile
-                CASE
-                    WHEN nombre_faits > moyenne_mobile * 1.2 THEN 'EN HAUSSE'
-                    WHEN nombre_faits < moyenne_mobile * 0.8 THEN 'EN BAISSE'
-                    ELSE 'STABLE'
-                END as tendance
-            FROM TransportCrimes
         )
         SELECT 
-            *,
-            -- Calcul du score de sécurité (0-100, 100 étant le plus sûr)
-            GREATEST(0, LEAST(100, 100 - (taux_100k * 2))) as score_securite
-        FROM RiskAnalysis
-        ORDER BY score_securite ASC;
+            code_departement,
+            type_crime,
+            annee,
+            nombre_faits,
+            taux_pour_mille,
+            taux_100k,
+            CASE 
+                WHEN taux_annee_precedente IS NULL OR taux_annee_precedente = 0 THEN 0
+                ELSE ROUND(((taux_pour_mille - taux_annee_precedente) / 
+                    taux_annee_precedente) * 100, 2)
+            END as evolution_pourcentage,
+            CASE
+                WHEN moyenne_mobile_taux = 0 THEN 0
+                ELSE ROUND(((taux_pour_mille - moyenne_mobile_taux) / moyenne_mobile_taux) * 100, 2)
+            END as evolution_moyenne_mobile,
+            CASE 
+                WHEN taux_annee_precedente IS NULL OR taux_annee_precedente = 0 THEN 'STABLE'
+                WHEN ((taux_pour_mille - taux_annee_precedente) / taux_annee_precedente * 100) > 20 
+                    OR ((taux_pour_mille - moyenne_mobile_taux) / moyenne_mobile_taux * 100) > 15 
+                    THEN 'FORTE HAUSSE'
+                WHEN ((taux_pour_mille - taux_annee_precedente) / taux_annee_precedente * 100) > 10 
+                    OR ((taux_pour_mille - moyenne_mobile_taux) / moyenne_mobile_taux * 100) > 10
+                    THEN 'HAUSSE'
+                WHEN ((taux_pour_mille - taux_annee_precedente) / taux_annee_precedente * 100) < -20 
+                    OR ((taux_pour_mille - moyenne_mobile_taux) / moyenne_mobile_taux * 100) < -15
+                    THEN 'FORTE BAISSE'
+                WHEN ((taux_pour_mille - taux_annee_precedente) / taux_annee_precedente * 100) < -10 
+                    OR ((taux_pour_mille - moyenne_mobile_taux) / moyenne_mobile_taux * 100) < -10
+                    THEN 'BAISSE'
+                WHEN ABS((taux_pour_mille - taux_annee_precedente) / taux_annee_precedente * 100) <= 5 
+                    AND ABS((taux_pour_mille - moyenne_mobile_taux) / moyenne_mobile_taux * 100) <= 7
+                    THEN 'STABLE'
+                ELSE 'VARIATION MODÉRÉE'
+            END as tendance,
+            CASE 
+                WHEN taux_100k > 50 OR 
+                    (taux_100k > 40 AND ((taux_pour_mille - taux_annee_precedente) / 
+                        NULLIF(taux_annee_precedente, 0) * 100) > 15) OR
+                    (rang_taux = 1 AND taux_annee_precedente IS NOT NULL AND
+                        ((taux_pour_mille - taux_annee_precedente) / 
+                        NULLIF(taux_annee_precedente, 0) * 100) > 0)
+                    THEN 'RISQUE TRÈS ÉLEVÉ'
+                WHEN taux_100k > 35 OR 
+                    (taux_100k > 25 AND ((taux_pour_mille - taux_annee_precedente) / 
+                        NULLIF(taux_annee_precedente, 0) * 100) > 10) OR
+                    rang_taux <= 2
+                    THEN 'RISQUE ÉLEVÉ'
+                WHEN taux_100k > 20 OR 
+                    (taux_100k > 15 AND ((taux_pour_mille - taux_annee_precedente) / 
+                        NULLIF(taux_annee_precedente, 0) * 100) > 5)
+                    THEN 'RISQUE MODÉRÉ'
+                WHEN taux_100k > 10
+                    THEN 'RISQUE FAIBLE'
+                ELSE 'RISQUE TRÈS FAIBLE'
+            END as niveau_risque,
+            GREATEST(0, LEAST(100, 
+                100 - (taux_100k * 0.8) - 
+                (CASE 
+                    WHEN taux_annee_precedente IS NOT NULL 
+                    AND ((taux_pour_mille - taux_annee_precedente) / 
+                        NULLIF(taux_annee_precedente, 0) * 100) > 0 
+                    THEN ((taux_pour_mille - taux_annee_precedente) / 
+                        NULLIF(taux_annee_precedente, 0) * 100) * 0.4 
+                    ELSE 0 
+                END) -
+                (CASE 
+                    WHEN moyenne_mobile_taux > 0 
+                    AND ((taux_pour_mille - moyenne_mobile_taux) / moyenne_mobile_taux * 100) > 0 
+                    THEN ((taux_pour_mille - moyenne_mobile_taux) / moyenne_mobile_taux * 100) * 0.3 
+                    ELSE 0 
+                END)
+            )) as score_securite
+        FROM TransportStats
+        WHERE annee = (SELECT MAX(annee) FROM TransportStats)
+        ORDER BY code_departement, score_securite DESC;
         """
         
-        df = self.db.execute_query(query, (dept_depart, dept_arrivee, annee, mois))
-        recommendations = self._generate_transport_route_recommendations(
-            df, dept_depart, dept_arrivee, mois
-        )
-        return df, recommendations
-
+        try:
+            df = self.db.execute_query(query, (dept_depart, dept_arrivee))
+            logger.info(f"Données récupérées: {len(df)} lignes")
+            
+            if df.empty:
+                return df, "Aucune donnée trouvée pour ces départements"
+                
+            recommendations = self._generate_transport_route_recommendations(
+                df, dept_depart, dept_arrivee
+            )
+            return df, recommendations
+        except Exception as e:
+            logger.error(f"Erreur dans _transport_security: {str(e)}")
+            logger.exception("Détails de l'erreur:")
+            return pd.DataFrame(), "Erreur lors de l'analyse des données de transport"
+    
     def _generate_real_estate_recommendations(self, df: pd.DataFrame) -> str:
         """Génère des recommandations pour la sécurité immobilière"""
         if df.empty:
@@ -775,22 +858,14 @@ class SecurityService:
         self, 
         df: pd.DataFrame, 
         dept_depart: str, 
-        dept_arrivee: str,
-        mois: int
+        dept_arrivee: str
     ) -> str:
         """Generate recommendations for transport route between departments"""
         if df.empty:
             return f"Aucune donnée disponible pour l'itinéraire {dept_depart} → {dept_arrivee}"
 
-        mois_noms = {
-            1: "janvier", 2: "février", 3: "mars", 4: "avril",
-            5: "mai", 6: "juin", 7: "juillet", 8: "août",
-            9: "septembre", 10: "octobre", 11: "novembre", 12: "décembre"
-        }
-
         recommendations = [
-            f"🚛 Analyse de sécurité : {dept_depart} → {dept_arrivee}",
-            f"📅 Période analysée : {mois_noms[mois]}"
+            f"🚛 Analyse de sécurité : {dept_depart} → {dept_arrivee}"
         ]
 
         # 1. Analyse des départements

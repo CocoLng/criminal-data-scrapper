@@ -1,9 +1,12 @@
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from typing import Dict, Optional, List
 import pandas as pd
 import numpy as np
 import logging
 import gradio as gr
+import math
+from PIL import ImageColor
 
 logger = logging.getLogger(__name__)
 
@@ -947,4 +950,285 @@ class SecurityVisualization:
             return fig
         except Exception as e:
             logger.error(f"Erreur lors de la création du scoring: {str(e)}")
+            return None
+        
+    ## Passage a Transport sécurité ##def create_transport_risk_radar(self, df: pd.DataFrame) -> Optional[go.Figure]:
+    def create_transport_risk_radar(self, df: pd.DataFrame) -> Optional[go.Figure]:
+        """
+        Crée un graphique radar unique avec superposition des départements pour comparaison directe
+        """
+        try:
+            required_columns = ['code_departement', 'type_crime', 'taux_100k', 'niveau_risque']
+            if not self._validate_dataframe(df, required_columns):
+                return None
+                
+            df_clean = df.copy()
+            df_clean['taux_100k'] = df_clean['taux_100k'].astype(float)
+            
+            # Ajout d'une petite valeur pour éviter log(0)
+            df_clean['taux_log'] = np.log10(df_clean['taux_100k'] + 1)
+            
+            dept_codes = df_clean['code_departement'].unique()
+            if len(dept_codes) != 2:
+                return None
+
+            # Trier les types de crimes par taux moyen décroissant
+            crime_order = (df_clean.groupby('type_crime')['taux_100k']
+                        .mean()
+                        .sort_values(ascending=False)
+                        .index.tolist())
+            
+            # Réorganiser le DataFrame selon l'ordre établi
+            df_clean['type_crime'] = pd.Categorical(
+                df_clean['type_crime'], 
+                categories=crime_order, 
+                ordered=True
+            )
+            df_clean = df_clean.sort_values(['code_departement', 'type_crime'])
+
+            # Création d'un seul graphique
+            fig = go.Figure()
+            
+            # Échelle maximale commune basée sur le log
+            max_log = df_clean['taux_log'].max()
+            max_scale = math.ceil(max_log)
+            
+            # Configuration des couleurs et styles pour chaque département
+            dept_styles = [
+                {'color': '#0d6efd', 'dash': 'solid', 'opacity': 0.6, 'name': 'Département de départ'},
+                {'color': '#dc3545', 'dash': 'solid', 'opacity': 0.6, 'name': 'Département d\'arrivée'}
+            ]
+            
+            # Création des tracés pour chaque département
+            for dept_code, style in zip(dept_codes, dept_styles):
+                dept_data = df_clean[df_clean['code_departement'] == dept_code]
+                
+                # Ajout du premier point à la fin pour fermer la boucle
+                r_values = list(dept_data['taux_log'].values)
+                theta_values = list(dept_data['type_crime'].values)
+                r_values.append(r_values[0])
+                theta_values.append(theta_values[0])
+                taux_values = list(dept_data['taux_100k'].values)
+                taux_values.append(taux_values[0])
+                
+                fig.add_trace(
+                    go.Scatterpolar(
+                        r=r_values,
+                        theta=theta_values,
+                        name=f"{style['name']} ({dept_code})",
+                        fill='toself',
+                        fillcolor=f"rgba{tuple(list(ImageColor.getrgb(style['color'])) + [style['opacity']])}",
+                        line=dict(
+                            color=style['color'],
+                            width=2,
+                            dash=style['dash']
+                        ),
+                        hovertemplate=(
+                            "<b>%{theta}</b><br>" +
+                            f"Département {dept_code}<br>" +
+                            "Taux: %{customdata:.1f} /100k hab.<br>" +
+                            "<extra></extra>"
+                        ),
+                        customdata=taux_values
+                    )
+                )
+            
+            # Configuration du graphique
+            fig.update_layout(
+                polar=dict(
+                    radialaxis=dict(
+                        visible=True,
+                        range=[0, max_scale],
+                        tickmode='array',
+                        ticktext=[f'{10**i:.0f}' for i in range(max_scale + 1)],
+                        tickvals=list(range(max_scale + 1)),
+                        tickfont=dict(size=10),
+                        ticksuffix="/100k",
+                        gridcolor='rgba(0,0,0,0.1)',
+                        linecolor='rgba(0,0,0,0.1)',
+                        showline=False
+                    ),
+                    angularaxis=dict(
+                        tickfont=dict(size=11),
+                        rotation=90,
+                        direction='clockwise',
+                        gridcolor='rgba(0,0,0,0)',
+                        linecolor='rgba(0,0,0,0.3)'
+                    )
+                ),
+                showlegend=True,
+                legend=dict(
+                    yanchor="top",
+                    y=1.1,
+                    xanchor="left",
+                    x=0.01,
+                    bgcolor='rgba(255,255,255,0.8)',
+                    bordercolor='rgba(0,0,0,0.2)',
+                    borderwidth=1
+                ),
+                title={
+                    'text': "Comparaison des taux d'incidents entre départements<br>" +
+                        "<span style='font-size:12px'>Échelle logarithmique pour une meilleure lisibilité</span>",
+                    'y': 0.95,
+                    'x': 0.5,
+                    'xanchor': 'center',
+                    'yanchor': 'top',
+                    'font': dict(size=16)
+                },
+                height=600,
+                margin=dict(t=120, b=50, l=50, r=50)
+            )
+            
+            # Ajout d'une annotation explicative
+            fig.add_annotation(
+                text="Les zones colorées montrent la distribution des incidents<br>" +
+                    "Plus la surface est étendue, plus le taux est élevé",
+                xref="paper", yref="paper",
+                x=0.5, y=-0.15,
+                showarrow=False,
+                font=dict(size=12, color="gray"),
+                align="center"
+            )
+            
+            return fig
+            
+        except Exception as e:
+            logger.error(f"Erreur lors de la création du radar des risques: {str(e)}")
+            return None
+
+    def create_transport_timeline(self, df: pd.DataFrame) -> Optional[go.Figure]:
+        """
+        Crée un graphique à barres divergentes montrant l'évolution entre départements
+        """
+        try:
+            required_columns = ['code_departement', 'type_crime', 'evolution_pourcentage', 'niveau_risque']
+            if not self._validate_dataframe(df, required_columns):
+                return None
+            
+            # Préparation des données
+            df_clean = df.copy()
+            df_clean['evolution_pourcentage'] = df_clean['evolution_pourcentage'].astype(float)
+            
+            dept_codes = sorted(df_clean['code_departement'].unique())
+            if len(dept_codes) != 2:
+                return None
+                
+            # Trier les types de crimes par amplitude d'évolution
+            crime_order = (df_clean.groupby('type_crime')['evolution_pourcentage']
+                        .agg(lambda x: abs(x).max())
+                        .sort_values(ascending=True)
+                        .index.tolist())
+            
+            # Réorganiser le DataFrame
+            df_clean['type_crime'] = pd.Categorical(
+                df_clean['type_crime'], 
+                categories=crime_order, 
+                ordered=True
+            )
+            df_clean = df_clean.sort_values(['code_departement', 'type_crime'])
+            
+            # Calculer les différences d'évolution entre départements
+            evol_data = []
+            for crime in crime_order:
+                dept1_evol = float(df_clean[(df_clean['code_departement'] == dept_codes[0]) & 
+                                        (df_clean['type_crime'] == crime)]['evolution_pourcentage'].iloc[0])
+                dept2_evol = float(df_clean[(df_clean['code_departement'] == dept_codes[1]) & 
+                                        (df_clean['type_crime'] == crime)]['evolution_pourcentage'].iloc[0])
+                evol_data.append({
+                    'type_crime': crime,
+                    'difference': dept2_evol - dept1_evol,
+                    'dept1_evol': dept1_evol,
+                    'dept2_evol': dept2_evol
+                })
+            
+            # Création du DataFrame des différences et tri
+            diff_df = pd.DataFrame(evol_data)
+            diff_df = diff_df.sort_values('difference')
+            
+            # Ajout des barres
+            colors = ['#198754' if x < 0 else '#dc3545' for x in diff_df['difference']]
+            
+            fig = go.Figure()
+            
+            fig.add_trace(go.Bar(
+                x=diff_df['type_crime'],
+                y=diff_df['difference'],
+                marker_color=colors,
+                customdata=np.stack((diff_df['dept1_evol'], diff_df['dept2_evol']), axis=1),
+                hovertemplate=(
+                    "<b>%{x}</b><br>" +
+                    f"Départ (Dept {dept_codes[0]}): %{{customdata[0]:.1f}}%<br>" +
+                    f"Arrivée (Dept {dept_codes[1]}): %{{customdata[1]:.1f}}%<br>" +
+                    "Différence: %{y:+.1f}%<br>" +
+                    "<extra></extra>"
+                )
+            ))
+            
+            # Mise en page avec titre plus clair
+            fig.update_layout(
+                title={
+                    'text': f"Évolution de la criminalité sur l'itinéraire<br>" +
+                        f"<span style='font-size:12px'>Comparaison du département d'arrivée ({dept_codes[1]}) " +
+                        f"par rapport au département de départ ({dept_codes[0]})</span>",
+                    'y': 0.95,
+                    'x': 0.5,
+                    'xanchor': 'center',
+                    'yanchor': 'top',
+                    'font': dict(size=16)
+                },
+                xaxis=dict(
+                    title="Type d'incident",
+                    tickangle=45,
+                    gridcolor='rgba(0,0,0,0.1)'
+                ),
+                yaxis=dict(
+                    title="Différence d'évolution (%)",
+                    zeroline=True,
+                    zerolinecolor='black',
+                    zerolinewidth=1,
+                    gridcolor='rgba(0,0,0,0.1)',
+                    ticksuffix="%"
+                ),
+                height=600,
+                showlegend=False,
+                margin=dict(l=80, r=50, t=120, b=150),
+                plot_bgcolor='white'
+            )
+            
+            # Légende explicative améliorée
+            fig.add_annotation(
+                text=(
+                    "<b>Guide de lecture</b><br><br>" +
+                    "<span style='color:#dc3545'>■</span> Rouge : Situation moins favorable<br>" +
+                    "dans le département d'arrivée<br><br>" +
+                    "<span style='color:#198754'>■</span> Vert : Situation plus favorable<br>" +
+                    "dans le département d'arrivée<br><br>" +
+                    f"Lecture : Une valeur de +10% signifie que<br>" +
+                    f"le département {dept_codes[1]} a connu une<br>" +
+                    f"hausse de 10% de plus que le<br>" +
+                    f"département {dept_codes[0]}"
+                ),
+                xref="paper", yref="paper",
+                x=-0.2, y=-0.84,
+                showarrow=False,
+                font=dict(size=8),
+                align="left",
+                bgcolor='rgba(255,255,255,0.9)',
+                bordercolor='rgba(0,0,0,0.2)',
+                borderwidth=1,
+                borderpad=4
+            )
+            
+            # Ajout d'une ligne de référence à 0%
+            fig.add_hline(
+                y=0,
+                line_dash="solid",
+                line_color="black",
+                line_width=1
+            )
+            
+            return fig
+            
+        except Exception as e:
+            logger.error(f"Erreur lors de la création de la timeline: {str(e)}")
             return None
