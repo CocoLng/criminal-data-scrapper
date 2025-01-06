@@ -109,7 +109,7 @@ class PredictiveService:
         return df, recommendations
 
     def _predictive_policing(self, department: str, horizon: str) -> Tuple[pd.DataFrame, str]:
-        """Generate predictive policing analysis"""
+        """Generate predictive policing analysis with fixed window functions"""
         horizon_months = self._parse_horizon(horizon)
         
         query = """
@@ -131,55 +131,58 @@ class PredictiveService:
             JOIN departements d ON s.code_departement = d.code_departement
             WHERE d.code_departement = %s
         ),
-        TrendCalculation AS (
+        TimeSeriesData AS (
+            SELECT 
+                code_departement,
+                type_crime,
+                annee,
+                mois,
+                nombre_faits,
+                moyenne_mobile,
+                @row_num := @row_num + 1 AS x_value
+            FROM HistoricalPatterns
+            CROSS JOIN (SELECT @row_num := 0) AS vars
+            ORDER BY annee, mois
+        ),
+        MovingAverages AS (
             SELECT 
                 *,
-                ROW_NUMBER() OVER (
-                    PARTITION BY code_departement, type_crime 
-                    ORDER BY annee, mois
-                ) as x_value,
                 AVG(nombre_faits) OVER (
                     PARTITION BY code_departement, type_crime
                     ORDER BY annee, mois
                     ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
                 ) as y_avg,
-                AVG(ROW_NUMBER() OVER (
-                    PARTITION BY code_departement, type_crime 
-                    ORDER BY annee, mois
-                )) OVER (
+                AVG(x_value) OVER (
                     PARTITION BY code_departement, type_crime
                     ORDER BY annee, mois
                     ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
                 ) as x_avg
-            FROM HistoricalPatterns
+            FROM TimeSeriesData
         ),
-        TrendSlope AS (
+        TrendCalculation AS (
             SELECT 
                 *,
-                (
-                    SUM((x_value - x_avg) * (nombre_faits - y_avg)) OVER (
+                SUM((x_value - x_avg) * (nombre_faits - y_avg)) OVER (
+                    PARTITION BY code_departement, type_crime
+                    ORDER BY annee, mois
+                    ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+                ) / NULLIF(
+                    SUM(POW(x_value - x_avg, 2)) OVER (
                         PARTITION BY code_departement, type_crime
                         ORDER BY annee, mois
                         ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
-                    ) /
-                    NULLIF(
-                        SUM(POW(x_value - x_avg, 2)) OVER (
-                            PARTITION BY code_departement, type_crime
-                            ORDER BY annee, mois
-                            ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
-                        ),
-                        0
-                    )
+                    ),
+                    0
                 ) as tendance_locale
-            FROM TrendCalculation
+            FROM MovingAverages
         ),
-        SeasonalComponent AS (
+        SeasonalFactors AS (
             SELECT 
                 *,
                 nombre_faits - AVG(nombre_faits) OVER (
                     PARTITION BY code_departement, type_crime, annee
                 ) as composante_saisonniere
-            FROM TrendSlope
+            FROM TrendCalculation
         )
         SELECT 
             code_departement,
@@ -201,8 +204,18 @@ class PredictiveService:
                 PARTITION BY code_departement, type_crime
                 ORDER BY annee, mois
                 ROWS BETWEEN 12 PRECEDING AND CURRENT ROW
-            ) * 1.96 as intervalle_confiance
-        FROM SeasonalComponent
+            ) * 1.96 as intervalle_confiance,
+            CASE 
+                WHEN tendance_locale > 0 AND ABS(tendance_locale) > 0.1 THEN 'HAUSSE'
+                WHEN tendance_locale < 0 AND ABS(tendance_locale) > 0.1 THEN 'BAISSE'
+                ELSE 'STABLE'
+            END as tendance_prevue,
+            CASE 
+                WHEN moyenne_mobile > AVG(moyenne_mobile) OVER (PARTITION BY code_departement)
+                THEN 'VIGILANCE ACCRUE'
+                ELSE 'NORMAL'
+            END as niveau_vigilance
+        FROM SeasonalFactors
         WHERE annee = (SELECT MAX(annee) FROM HistoricalPatterns)
         ORDER BY prediction_base DESC;
         """
@@ -221,7 +234,7 @@ class PredictiveService:
             return 6
         elif horizon == "1 an":
             return 12
-        return 3  # default
+        return 3 # Défaut: 3 mois
 
     def _generate_seasonal_recommendations(self, df: pd.DataFrame) -> str:
         """Generate recommendations based on seasonal predictions"""
