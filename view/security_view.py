@@ -399,10 +399,11 @@ class SecurityVisualization:
     def create_alert_gauge(self, df: pd.DataFrame) -> Optional[go.Figure]:
         """Crée une jauge de niveau d'alerte basée sur les z-scores"""
         try:
-            required_columns = ['z_score', 'niveau_alerte', 'annee']
+            required_columns = ['z_score', 'niveau_alerte', 'type_crime', 'taux_pour_mille']
             if not self._validate_dataframe(df, required_columns):
+                logger.error("Colonnes manquantes pour la jauge d'alerte")
                 return None
-
+                
             df_clean = df.dropna(subset=['z_score', 'niveau_alerte'])
             
             if df_clean.empty:
@@ -413,17 +414,20 @@ class SecurityVisualization:
             max_z_score_idx = df_clean['z_score'].idxmax()
             max_z_score = df_clean.loc[max_z_score_idx, 'z_score']
             niveau_max = df_clean.loc[max_z_score_idx, 'niveau_alerte']
+            type_crime_max = df_clean.loc[max_z_score_idx, 'type_crime']
+            taux_max = df_clean.loc[max_z_score_idx, 'taux_pour_mille']
 
-            # Vérification des valeurs
-            if pd.isna(max_z_score) or pd.isna(niveau_max):
-                logger.warning("Valeurs maximales non valides")
-                return None
+            # Log pour debug
+            logger.info(f"Score maximum trouvé : {max_z_score} pour {type_crime_max}")
+            logger.info(f"Niveau d'alerte : {niveau_max} (taux: {taux_max}‰)")
             
             fig = go.Figure(go.Indicator(
                 mode="gauge+number+delta",
                 value=max_z_score,
                 title={
-                    'text': f"Niveau d'Alerte Maximum<br><span style='font-size:0.8em;color:gray'>{niveau_max}</span>",
+                    'text': f"Niveau d'Alerte Maximum<br>" +
+                        f"<span style='font-size:0.8em;color:gray'>{niveau_max}</span><br>" +
+                        f"<span style='font-size:0.7em;color:gray'>{type_crime_max}</span>",
                     'font': {'size': 24}
                 },
                 number={
@@ -431,7 +435,7 @@ class SecurityVisualization:
                     'font': {'size': 26},
                     'valueformat': '.1f'
                 },
-                delta={'reference': 2, 'decreasing': {'color': "#198754"}, 'increasing': {'color': "#dc3545"}},
+                delta={'reference': 1, 'decreasing': {'color': "#198754"}, 'increasing': {'color': "#dc3545"}},
                 gauge={
                     'axis': {
                         'range': [0, 4],
@@ -462,11 +466,13 @@ class SecurityVisualization:
             
             fig.add_annotation(
                 text=(
-                    "σ = écart-type par rapport à la normale<br>"
+                    f"Type d'incident le plus critique : {type_crime_max}<br>" +
+                    f"Taux actuel : {taux_max:.1f}‰<br>" +
+                    "σ = écart-type par rapport à la normale<br>" +
                     "Seuils : < 1σ Normal, 1-2σ Vigilance, 2-3σ Alerte, > 3σ Alerte Rouge"
                 ),
                 xref="paper", yref="paper",
-                x=0, y=-0.3,
+                x=0, y=-0.6,
                 showarrow=False,
                 font=dict(size=12, color="gray"),
                 align="left"

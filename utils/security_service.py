@@ -302,7 +302,7 @@ class SecurityService:
             logger.error(f"Erreur lors de l'analyse immobilière: {str(e)}")
             return pd.DataFrame(), "Erreur lors de l'analyse des données immobilières"
     
-    def _neighborhood_alert(self, department: str, year: int, radius: int) -> Tuple[pd.DataFrame, str]:
+    def _neighborhood_alert(self, department: str, year: int, radius: int = None) -> Tuple[pd.DataFrame, str]:
         """Generate neighborhood alerts and risk analysis"""
         query = """
         WITH TemporalTrends AS (
@@ -311,21 +311,28 @@ class SecurityService:
                 c.type_crime,
                 c.annee,
                 c.nombre_faits,
+                s.taux_pour_mille,
                 COALESCE(
-                    AVG(c.nombre_faits) OVER (
+                    AVG(s.taux_pour_mille) OVER (
                         PARTITION BY d.code_departement, c.type_crime
                         ORDER BY c.annee
                         ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
                     ),
-                    c.nombre_faits
+                    s.taux_pour_mille
                 ) as moyenne_mobile,
                 COALESCE(
-                    STDDEV(c.nombre_faits) OVER (
+                    STDDEV(s.taux_pour_mille) OVER (
                         PARTITION BY d.code_departement, c.type_crime
                         ORDER BY c.annee
                         ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
                     ),
-                    0.0001  -- Petite valeur pour éviter division par zéro
+                    CASE 
+                        WHEN c.annee <= 2018 THEN s.taux_pour_mille * 0.1
+                        ELSE NULLIF(ABS(s.taux_pour_mille - LAG(s.taux_pour_mille) OVER (
+                            PARTITION BY d.code_departement, c.type_crime 
+                            ORDER BY c.annee
+                        )), 0)
+                    END
                 ) as ecart_type
             FROM crimes c
             JOIN statistiques s ON c.id_crime = s.id_crime
@@ -338,10 +345,12 @@ class SecurityService:
                 type_crime,
                 annee,
                 nombre_faits,
+                taux_pour_mille,
                 moyenne_mobile,
+                ecart_type,
                 CASE 
-                    WHEN ecart_type = 0.0001 THEN 0  -- cas où on n'a pas assez d'historique
-                    ELSE (nombre_faits - moyenne_mobile) / ecart_type 
+                    WHEN ecart_type = 0 THEN 0
+                    ELSE (taux_pour_mille - moyenne_mobile) / NULLIF(ecart_type, 0)
                 END as z_score
             FROM TemporalTrends
             WHERE annee = %s
@@ -353,15 +362,44 @@ class SecurityService:
                 WHEN z_score > 1 THEN 'ALERTE ORANGE'
                 WHEN z_score > 0 THEN 'VIGILANCE'
                 ELSE 'NORMAL'
-            END as niveau_alerte
+            END as niveau_alerte,
+            LAG(taux_pour_mille) OVER (
+                PARTITION BY code_departement, type_crime 
+                ORDER BY annee
+            ) as taux_precedent,
+            CASE 
+                WHEN LAG(taux_pour_mille) OVER (
+                    PARTITION BY code_departement, type_crime 
+                    ORDER BY annee
+                ) = 0 THEN 0
+                ELSE ((taux_pour_mille - LAG(taux_pour_mille) OVER (
+                    PARTITION BY code_departement, type_crime 
+                    ORDER BY annee
+                )) / NULLIF(LAG(taux_pour_mille) OVER (
+                    PARTITION BY code_departement, type_crime 
+                    ORDER BY annee
+                ), 0) * 100)
+            END as evolution_pourcentage
         FROM RiskAssessment
         ORDER BY z_score DESC;
         """
         
-        df = self.db.execute_query(query, (department, year))
-        recommendations = self._generate_alert_recommendations(df)
-        return df, recommendations
-
+        try:
+            df = self.db.execute_query(query, (department, year))
+            logger.info(f"Données récupérées pour alerte voisinage: {len(df)} lignes")
+            logger.debug(f"Échantillon des données: \n{df.head()}")
+            
+            if df.empty:
+                return df, "Aucune donnée disponible pour cette période"
+                
+            recommendations = self._generate_alert_recommendations(df)
+            return df, recommendations
+            
+        except Exception as e:
+            logger.error(f"Erreur dans _neighborhood_alert: {str(e)}")
+            logger.exception("Détails de l'erreur:")
+            return pd.DataFrame(), f"Erreur lors de l'analyse : {str(e)}"
+    
     def _business_security(self, department: str, year: int = None) -> Tuple[pd.DataFrame, str]:
         """Analyze business security risks with historical context"""
         logger.info(f"Exécution de business_security pour dept={department}")
@@ -695,7 +733,11 @@ class SecurityService:
         if df.empty:
             return "Aucune donnée disponible pour générer des alertes"
                 
-        alerts = df[df['niveau_alerte'].isin(['ALERTE ROUGE', 'ALERTE ORANGE'])]
+        # Conversion des None en NaN pour faciliter le filtrage
+        df_clean = df.copy()
+        df_clean['evolution_pourcentage'] = pd.to_numeric(df_clean['evolution_pourcentage'], errors='coerce')
+                
+        alerts = df_clean[df_clean['niveau_alerte'].isin(['ALERTE ROUGE', 'ALERTE ORANGE'])]
         recommendations = ["🚨 Système d'alerte de voisinage :"]
         
         # Analyse des alertes actives
@@ -703,9 +745,10 @@ class SecurityService:
             recommendations.append("\nPoints d'attention critiques :")
             for _, alert in alerts.iterrows():
                 z_score = alert['z_score']
+                taux = alert['taux_pour_mille']
                 recommendations.append(
                     f"- {alert['type_crime']}: {alert['niveau_alerte']} "
-                    f"(Intensité: {z_score:.1f}σ)"
+                    f"(Intensité: {z_score:.1f}σ, Taux: {taux:.1f}‰)"
                 )
                 
                 # Recommandations selon le niveau d'alerte
@@ -729,17 +772,37 @@ class SecurityService:
                 "• Poursuite des bonnes pratiques de sécurité"
             ])
         
-        # Analyse temporelle si disponible
-        if 'evolution_pourcentage' in df.columns:
-            trends = df[abs(df['evolution_pourcentage']) > 15]
-            if not trends.empty:
-                recommendations.append("\nTendances à surveiller :")
-                for _, trend in trends.iterrows():
-                    recommendations.append(
-                        f"- {trend['type_crime']}: {trend['evolution_pourcentage']:+.1f}% "
-                        f"d'évolution"
-                    )
+        # Analyse des tendances significatives
+        significant_trends = df_clean[
+            df_clean['evolution_pourcentage'].notna() & 
+            (abs(df_clean['evolution_pourcentage']) > 15)
+        ]
+        
+        if not significant_trends.empty:
+            recommendations.append("\nTendances significatives à surveiller :")
+            for _, trend in significant_trends.iterrows():
+                evol = trend['evolution_pourcentage']
+                taux = trend['taux_pour_mille']
+                taux_prec = trend['taux_precedent'] if pd.notna(trend['taux_precedent']) else 0
                 
+                # Détermination de l'icône selon l'évolution
+                icon = "📈" if evol > 0 else "📉"
+                
+                recommendations.append(
+                    f"- {icon} {trend['type_crime']}: {evol:+.1f}% d'évolution "
+                    f"(Taux actuel: {taux:.1f}‰, Précédent: {taux_prec:.1f}‰)"
+                )
+                
+                # Ajout de conseils spécifiques pour les hausses importantes
+                if evol > 30:
+                    recommendations.append(
+                        "  • Vigilance particulière recommandée sur ce type d'incident"
+                    )
+                elif evol > 15:
+                    recommendations.append(
+                        "  • Situation à surveiller dans les prochains mois"
+                    )
+        
         return "\n".join(recommendations)
 
     def _generate_business_recommendations(self, df: pd.DataFrame) -> str:
