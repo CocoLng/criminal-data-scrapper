@@ -25,26 +25,51 @@ class SecurityVisualization:
             return False
         return True
     
+    def _sigmoid_scale(self, x: float, k: float = 0.02) -> float:
+        """
+        Applique une transformation sigmoïde à la valeur.
+        Args:
+            x (float): Valeur d'entrée (pourcentage de sécurité)
+            k (float): Facteur de mise à l'échelle (contrôle la pente de la sigmoïde)
+        Returns:
+            float: Valeur transformée entre -100 et 100
+        """
+        # Application de la fonction sigmoïde
+        sigmoid = 2 / (1 + np.exp(-k * x)) - 1
+        # Mise à l'échelle pour obtenir des valeurs entre -100 et 100
+        return sigmoid * 100
+
     def create_risk_gauge(self, df: pd.DataFrame) -> Optional[go.Figure]:
-        """Crée une jauge montrant le score de sécurité relatif"""
+        """Crée une jauge montrant le score de sécurité relatif avec transformation sigmoïde"""
         try:
             required_columns = ['score_securite']
             if not self._validate_dataframe(df, required_columns):
                 return None
             
+            # Calcul du score moyen original (pour l'affichage)
             score_moyen = df['score_securite'].mean()
             
+            # Application de la transformation sigmoïde pour l'affichage visuel
+            score_transforme = self._sigmoid_scale(score_moyen)
+            
             fig = go.Figure(go.Indicator(
-                mode="gauge+number",
-                value=score_moyen,
+                mode="gauge+number+delta",  # Ajout du mode delta
+                value=score_transforme,  # Utilisation du score transformé pour la barre bleue
                 title={
                     'text': "Score de sécurité relatif<br><span style='font-size:0.8em;color:gray'>Par rapport à la moyenne nationale</span>", 
                     'font': {'size': 24}
                 },
                 number={
-                    'suffix': '%', 
                     'font': {'size': 26},
-                    'valueformat': '.1f'
+                    'valueformat': '.1f',
+                    'prefix': 'Score réel : ',
+                    'suffix': '%'
+                },
+                delta={
+                    'reference': score_moyen,  # Utilisation du score réel comme référence
+                    'increasing': {'color': "rgba(0,0,0,0)"},  # Cache la flèche du delta
+                    'decreasing': {'color': "rgba(0,0,0,0)"},  # Cache la flèche du delta
+                    'position': "top"  # Position au-dessus du nombre principal
                 },
                 gauge={
                     'axis': {
@@ -54,7 +79,10 @@ class SecurityVisualization:
                         'ticktext': ['Risqué', 'Modéré', 'Moyenne nationale', 'Sûr', 'Très sûr'],
                         'tickvals': [-80, -40, 0, 40, 80]
                     },
-                    'bar': {'color': "#0d6efd"},
+                    'bar': {
+                        'color': "#0d6efd",
+                        'thickness': 0.75,
+                    },
                     'bgcolor': "white",
                     'borderwidth': 2,
                     'bordercolor': "gray",
@@ -68,27 +96,30 @@ class SecurityVisualization:
                     'threshold': {
                         'line': {'color': "black", 'width': 4},
                         'thickness': 0.75,
-                        'value': score_moyen
+                        'value': score_transforme  # La barre noire suit la même valeur
                     }
                 }
             ))
             
+            # Ajout d'une annotation pour expliquer la transformation
             fig.add_annotation(
                 text=(
                     "Score calculé à partir du taux d'incidents pour 1000 habitants<br>"
                     "0% = équivalent à la moyenne nationale<br>"
                     "Score positif = plus sûr que la moyenne<br>"
-                    "Score négatif = moins sûr que la moyenne"
+                    "Score négatif = moins sûr que la moyenne<br><br>"
+                    f"Score visuel adapté : {score_transforme:.1f}%"
                 ),
                 xref="paper", yref="paper",
-                x=0, y=-0.3,  # Déplacé plus bas
+                x=0, y=-0.3,
                 showarrow=False,
                 font=dict(size=12, color="gray"),
                 align="left"
             )
             
-            fig.update_layout(height=450)  # Augmenté pour accommoder le texte
+            fig.update_layout(height=450)
             return fig
+            
         except Exception as e:
             logger.error(f"Erreur lors de la création de la jauge: {str(e)}")
             return None
