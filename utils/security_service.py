@@ -4,6 +4,7 @@ from database.database import DatabaseConnection
 from view.security_view import SecurityVisualization
 import logging
 import gradio as gr
+import plotly.graph_objects as go
 
 logger = logging.getLogger(__name__)
 
@@ -22,15 +23,12 @@ class SecurityService:
         crime_type: str = None,
         radius: int = None
     ) -> Tuple[pd.DataFrame, str, gr.Plot, gr.Plot, gr.Plot, gr.Plot]:
-        """
-        Traite les demandes de service de sécurité
-        Returns:
-            Tuple[pd.DataFrame, str, gr.Plot, gr.Plot, gr.Plot, gr.Plot]: 
-            (données, recommandations, plot1, plot2, plot3, plot4)
-        """
         try:
-            # Initialisation des plots vides
             empty_plots = [None] * 4
+            
+            # Convertir l'année en format complet
+            full_year = 2000 + year if year < 100 else year
+            logger.info(f"Année convertie : {year} -> {full_year}")
             
             # Obtenir les données et recommandations
             df, recommendations = self._get_service_data(
@@ -40,34 +38,109 @@ class SecurityService:
             if df.empty:
                 return (df, "Aucune donnée disponible", *empty_plots)
                 
-            # Générer les visualisations
             try:
-                if service == "Sécurité Immobilière":
-                    figures = self.visualizer.generate_security_visualizations(df)
-                    # S'assurer d'avoir exactement 4 figures
-                    plots = [gr.Plot(fig) if fig else None for fig in (figures + empty_plots)[:4]]
-                    return (df, recommendations, *plots)
-                
-                elif service == "AlerteVoisinage+":
+                if service == "AlerteVoisinage+":
                     plots = empty_plots
-                    heatmap = self.visualizer.create_risk_heatmap(df)
-                    trend = self.visualizer.create_trend_analysis(df)
                     
-                    if heatmap:
-                        plots[0] = gr.Plot(heatmap)
-                    if trend:
-                        plots[1] = gr.Plot(trend)
+                    # Debug
+                    logger.info(f"Données reçues: \n{df.head()}")
                     
+                    fig = None
+                    if full_year == 2016:
+                        logger.info("Création du message pour 2016")
+                        fig = go.Figure()
+                        
+                        # Ajout d'un rectangle de fond pour mieux voir le message
+                        fig.add_shape(
+                            type="rect",
+                            x0=0, y0=0, x1=1, y1=1,
+                            xref="paper", yref="paper",
+                            fillcolor="white",
+                            line_width=0
+                        )
+                        
+                        # Icône d'information
+                        fig.add_annotation(
+                            text="ℹ️",
+                            xref="paper", yref="paper",
+                            x=0.5, y=1.25,
+                            showarrow=False,
+                            font=dict(size=40),
+                            align="center"
+                        )
+                        
+                        # Titre
+                        fig.add_annotation(
+                            text="Données historiques insuffisantes",
+                            xref="paper", yref="paper",
+                            x=0.5, y=1,
+                            showarrow=False,
+                            font=dict(size=24, color="darkblue", family="Arial Black"),
+                            align="center"
+                        )
+                        
+                        # Message explicatif
+                        fig.add_annotation(
+                            text=(
+                                "2016 est la première année de nos données.<br>" +
+                                "Le calcul du niveau d'alerte nécessite un historique<br>" +
+                                "d'au moins 2 ans pour être pertinent.<br><br>" +
+                                "👉 Consultez les années ultérieures pour<br>" +
+                                "voir l'évolution des alertes."
+                            ),
+                            xref="paper", yref="paper",
+                            x=0.5, y=0.4,
+                            showarrow=False,
+                            font=dict(size=16, color="gray"),
+                            align="center"
+                        )
+                        
+                        fig.update_layout(
+                            showlegend=False,
+                            height=300,
+                            paper_bgcolor='white',
+                            plot_bgcolor='white',
+                            margin=dict(t=50, b=50, l=50, r=50),
+                            xaxis={'showgrid': False, 'showticklabels': False, 'zeroline': False},
+                            yaxis={'showgrid': False, 'showticklabels': False, 'zeroline': False}
+                        )
+                        logger.info("Message 2016 créé avec succès")
+                    else:
+                        logger.info("Création de la jauge standard")
+                        fig = self.visualizer.create_alert_gauge(df)
+                    
+                    # Si on a une figure, on la convertit en Plot
+                    if fig is not None:
+                        logger.info("Conversion de la figure en Plot")
+                        plots[0] = gr.Plot(fig)
+                    else:
+                        logger.warning("Aucune figure créée")
+                        plots[0] = gr.Plot()  # Plot vide plutôt que None
+                    
+                    # Création de la heatmap
+                    alert_heatmap = self.visualizer.create_alert_heatmap(df)
+                    if alert_heatmap is not None:
+                        plots[1] = gr.Plot(alert_heatmap)
+                    else:
+                        plots[1] = gr.Plot()  # Plot vide plutôt que None
+                    
+                    return (df, recommendations, *plots)
+                    
+                elif service == "Sécurité Immobilière":
+                    figures = self.visualizer.generate_security_visualizations(df)
+                    plots = [gr.Plot(fig) if fig else gr.Plot() for fig in (figures + empty_plots)[:4]]
                     return (df, recommendations, *plots)
                 
                 return (df, recommendations, *empty_plots)
             
             except Exception as viz_error:
                 logger.error(f"Erreur lors de la génération des visualisations: {viz_error}")
+                logger.exception("Détails de l'erreur:")
                 return (df, recommendations, *empty_plots)
             
         except Exception as e:
             logger.error(f"Erreur dans process_request: {str(e)}")
+            logger.exception("Détails de l'erreur:")
             return (pd.DataFrame(), f"Erreur: {str(e)}", *empty_plots)
 
     def _get_service_data(
@@ -176,15 +249,21 @@ class SecurityService:
                 c.type_crime,
                 c.annee,
                 c.nombre_faits,
-                AVG(c.nombre_faits) OVER (
-                    PARTITION BY d.code_departement, c.type_crime
-                    ORDER BY c.annee
-                    ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+                COALESCE(
+                    AVG(c.nombre_faits) OVER (
+                        PARTITION BY d.code_departement, c.type_crime
+                        ORDER BY c.annee
+                        ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+                    ),
+                    c.nombre_faits
                 ) as moyenne_mobile,
-                STDDEV(c.nombre_faits) OVER (
-                    PARTITION BY d.code_departement, c.type_crime
-                    ORDER BY c.annee
-                    ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+                COALESCE(
+                    STDDEV(c.nombre_faits) OVER (
+                        PARTITION BY d.code_departement, c.type_crime
+                        ORDER BY c.annee
+                        ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+                    ),
+                    0.0001  -- Petite valeur pour éviter division par zéro
                 ) as ecart_type
             FROM crimes c
             JOIN statistiques s ON c.id_crime = s.id_crime
@@ -198,7 +277,10 @@ class SecurityService:
                 annee,
                 nombre_faits,
                 moyenne_mobile,
-                (nombre_faits - moyenne_mobile) / NULLIF(ecart_type, 0) as z_score
+                CASE 
+                    WHEN ecart_type = 0.0001 THEN 0  -- cas où on n'a pas assez d'historique
+                    ELSE (nombre_faits - moyenne_mobile) / ecart_type 
+                END as z_score
             FROM TemporalTrends
             WHERE annee = %s
         )

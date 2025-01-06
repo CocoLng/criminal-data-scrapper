@@ -120,6 +120,7 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                     year_security = gr.Dropdown(
                         choices=interface_manager.annees,
                         label="Année",
+                        value=21,
                         visible=True
                     )
                     
@@ -136,12 +137,6 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                         label="Rayon d'analyse (km)",
                         visible=False
                     )
-                    month_security = gr.Dropdown(
-                        choices=[str(i).zfill(2) for i in range(1, 13)],
-                        value="01",
-                        label="Mois",
-                        visible=False
-                    )
                 
                 security_button = gr.Button("Analyser")
 
@@ -152,7 +147,6 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                             dept_security: gr.update(visible=True, label="Département de départ"),
                             dept_security_dest: gr.update(visible=True),
                             year_security: gr.update(visible=True),
-                            month_security: gr.update(visible=True),
                             crime_type_security: gr.update(visible=False),
                             radius_security: gr.update(visible=False)
                         }
@@ -161,7 +155,6 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                             dept_security: gr.update(visible=True, label="Département"),
                             dept_security_dest: gr.update(visible=False),
                             year_security: gr.update(visible=True),
-                            month_security: gr.update(visible=False),
                             crime_type_security: gr.update(visible=False),
                             radius_security: gr.update(visible=True)
                         }
@@ -170,7 +163,6 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                             dept_security: gr.update(visible=True, label="Département"),
                             dept_security_dest: gr.update(visible=False),
                             year_security: gr.update(visible=True),
-                            month_security: gr.update(visible=False),
                             crime_type_security: gr.update(visible=True),
                             radius_security: gr.update(visible=False)
                         }
@@ -179,7 +171,6 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                             dept_security: gr.update(visible=True, label="Département"),
                             dept_security_dest: gr.update(visible=False),
                             year_security: gr.update(visible=True),
-                            month_security: gr.update(visible=False),
                             crime_type_security: gr.update(visible=False),
                             radius_security: gr.update(visible=False)
                         }
@@ -192,7 +183,6 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                         dept_security,
                         dept_security_dest,
                         year_security,
-                        month_security,
                         crime_type_security,
                         radius_security
                     ]
@@ -294,12 +284,37 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
             # Zone de résultats commune au onglets
             with gr.Column():
                 gr.Markdown("## Visualisations")
+                
+                # Création dynamique des plots en fonction du service sélectionné
+                def update_plots_visibility(service):
+                    if service == "AlerteVoisinage+":
+                        return {
+                            plot1: gr.update(visible=True, label="Niveau d'Alerte Maximum"),
+                            plot2: gr.update(visible=True, label="Distribution des Alertes"),
+                            plot3: gr.update(visible=False),
+                            plot4: gr.update(visible=False)
+                        }
+                    else:
+                        return {
+                            plot1: gr.update(visible=True, label="Score de sécurité"),
+                            plot2: gr.update(visible=True, label="Distribution des risques"),
+                            plot3: gr.update(visible=True, label="Évolution temporelle"),
+                            plot4: gr.update(visible=True, label="Analyse comparative")
+                        }
+                
                 with gr.Row():
                     plot1 = gr.Plot(label="Score de sécurité")
                     plot2 = gr.Plot(label="Distribution des risques")
                 with gr.Row():
-                    plot3 = gr.Plot(label="Évolution temporelle")
-                    plot4 = gr.Plot(label="Analyse comparative")
+                    plot3 = gr.Plot(label="Évolution temporelle", visible=True)
+                    plot4 = gr.Plot(label="Analyse comparative", visible=True)
+                
+                # Connexion de l'événement de changement de service
+                security_service.change(
+                    fn=update_plots_visibility,
+                    inputs=[security_service],
+                    outputs=[plot1, plot2, plot3, plot4]
+                )
                 
                 gr.Markdown("## Analyse et Recommandations")
                 insights = gr.Textbox(lines=3)
@@ -314,7 +329,6 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                         dept_security: gr.update(visible=True, label="Département de départ"),
                         dept_security_dest: gr.update(visible=True),
                         year_security: gr.update(visible=True),
-                        month_security: gr.update(visible=True),
                         crime_type_security: gr.update(visible=False),
                         radius_security: gr.update(visible=False)
                     }
@@ -323,7 +337,6 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                         dept_security: gr.update(visible=True, label="Département"),
                         dept_security_dest: gr.update(visible=False),
                         year_security: gr.update(visible=True),
-                        month_security: gr.update(visible=False),
                         crime_type_security: gr.update(visible=False),
                         radius_security: gr.update(visible=True)
                     }
@@ -332,7 +345,6 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                         dept_security: gr.update(visible=True, label="Département"),
                         dept_security_dest: gr.update(visible=False),
                         year_security: gr.update(visible=True),
-                        month_security: gr.update(visible=False),
                         crime_type_security: gr.update(visible=True),
                         radius_security: gr.update(visible=False)
                     }
@@ -341,24 +353,9 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                         dept_security: gr.update(visible=True, label="Département"),
                         dept_security_dest: gr.update(visible=False),
                         year_security: gr.update(visible=True),
-                        month_security: gr.update(visible=False),
                         crime_type_security: gr.update(visible=False),
                         radius_security: gr.update(visible=False)
                     }
-
-            # Event handlers
-            security_service.change(
-                fn=update_security_fields,
-                inputs=[security_service],
-                outputs=[
-                    dept_security,
-                    dept_security_dest,
-                    year_security,
-                    month_security,
-                    crime_type_security,
-                    radius_security
-                ]
-            )
 
             # Connexion du bouton d'analyse
             security_button.click(
@@ -368,7 +365,6 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                     dept_security,
                     year_security,
                     dept_security_dest,
-                    month_security,
                     crime_type_security,
                     radius_security
                 ],

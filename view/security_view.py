@@ -343,3 +343,133 @@ class SecurityVisualization:
         except Exception as e:
             logger.error(f"Erreur lors de la création de la distribution des risques: {str(e)}")
             return None
+        
+        ### PASSAGE A AlerteVoisinage+ ###
+    def create_alert_heatmap(self, df: pd.DataFrame) -> Optional[go.Figure]:
+        """Crée une heatmap des niveaux d'alerte par type de crime"""
+        try:
+            required_columns = ['type_crime', 'z_score', 'niveau_alerte']
+            if not self._validate_dataframe(df, required_columns):
+                return None
+
+            # Préparation des données
+            pivot_data = df.pivot_table(
+                values='z_score',
+                index='type_crime',
+                columns='niveau_alerte',
+                aggfunc='count',
+                fill_value=0
+            )
+
+            # Création de la heatmap
+            fig = go.Figure(data=go.Heatmap(
+                z=pivot_data.values,
+                x=pivot_data.columns,
+                y=pivot_data.index,
+                colorscale=[
+                    [0, '#198754'],    # Vert
+                    [0.33, '#ffc107'],  # Jaune
+                    [0.66, '#fd7e14'],  # Orange
+                    [1, '#dc3545']      # Rouge
+                ],
+                hoverongaps=False,
+                hovertemplate=(
+                    "Type: %{y}<br>" +
+                    "Niveau: %{x}<br>" +
+                    "Nombre: %{z}<br>" +
+                    "<extra></extra>"
+                )
+            ))
+
+            fig.update_layout(
+                title='Distribution des alertes par type de crime',
+                xaxis_title='Niveau d\'alerte',
+                yaxis_title='Type de crime',
+                height=400
+            )
+
+            return fig
+        except Exception as e:
+            logger.error(f"Erreur lors de la création de la heatmap: {str(e)}")
+            return None
+
+    def create_alert_gauge(self, df: pd.DataFrame) -> Optional[go.Figure]:
+        """Crée une jauge de niveau d'alerte basée sur les z-scores"""
+        try:
+            required_columns = ['z_score', 'niveau_alerte', 'annee']
+            if not self._validate_dataframe(df, required_columns):
+                return None
+
+            df_clean = df.dropna(subset=['z_score', 'niveau_alerte'])
+            
+            if df_clean.empty:
+                logger.warning("Aucune donnée valide pour créer la jauge d'alerte")
+                return None
+
+            # Calcul du z-score maximal et du niveau correspondant
+            max_z_score_idx = df_clean['z_score'].idxmax()
+            max_z_score = df_clean.loc[max_z_score_idx, 'z_score']
+            niveau_max = df_clean.loc[max_z_score_idx, 'niveau_alerte']
+
+            # Vérification des valeurs
+            if pd.isna(max_z_score) or pd.isna(niveau_max):
+                logger.warning("Valeurs maximales non valides")
+                return None
+            
+            fig = go.Figure(go.Indicator(
+                mode="gauge+number+delta",
+                value=max_z_score,
+                title={
+                    'text': f"Niveau d'Alerte Maximum<br><span style='font-size:0.8em;color:gray'>{niveau_max}</span>",
+                    'font': {'size': 24}
+                },
+                number={
+                    'suffix': 'σ',
+                    'font': {'size': 26},
+                    'valueformat': '.1f'
+                },
+                delta={'reference': 2, 'decreasing': {'color': "#198754"}, 'increasing': {'color': "#dc3545"}},
+                gauge={
+                    'axis': {
+                        'range': [0, 4],
+                        'tickwidth': 1,
+                        'tickcolor': "darkblue",
+                        'ticktext': ['NORMAL', 'VIGILANCE', 'ALERTE', 'ALERTE ROUGE'],
+                        'tickvals': [0, 1, 2, 3]
+                    },
+                    'bar': {'color': "darkblue"},
+                    'bgcolor': "white",
+                    'borderwidth': 2,
+                    'bordercolor': "gray",
+                    'steps': [
+                        {'range': [0, 1], 'color': "#198754"},  # Vert
+                        {'range': [1, 2], 'color': "#ffc107"},  # Jaune
+                        {'range': [2, 3], 'color': "#fd7e14"},  # Orange
+                        {'range': [3, 4], 'color': "#dc3545"}   # Rouge
+                    ],
+                    'threshold': {
+                        'line': {'color': "black", 'width': 4},
+                        'thickness': 0.75,
+                        'value': max_z_score
+                    }
+                }
+            ))
+
+            fig.update_layout(height=300)
+            
+            fig.add_annotation(
+                text=(
+                    "σ = écart-type par rapport à la normale<br>"
+                    "Seuils : < 1σ Normal, 1-2σ Vigilance, 2-3σ Alerte, > 3σ Alerte Rouge"
+                ),
+                xref="paper", yref="paper",
+                x=0, y=-0.3,
+                showarrow=False,
+                font=dict(size=12, color="gray"),
+                align="left"
+            )
+
+            return fig
+        except Exception as e:
+            logger.error(f"Erreur lors de la création de la jauge d'alerte: {str(e)}")
+            return None
