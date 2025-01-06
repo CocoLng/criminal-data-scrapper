@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import logging
 import gradio as gr
+import plotly.express as px
 
 logger = logging.getLogger(__name__)
 
@@ -472,4 +473,310 @@ class SecurityVisualization:
             return fig
         except Exception as e:
             logger.error(f"Erreur lors de la création de la jauge d'alerte: {str(e)}")
+            return None
+        
+        ### PASSAGE A Buisiness Security ###
+    def create_business_impact_heatmap(self, df: pd.DataFrame) -> Optional[go.Figure]:
+        """Crée une heatmap de l'impact des crimes sur différents types d'activités commerciales"""
+        try:
+            required_columns = ['type_crime', 'taux_dept', 'niveau_risque']
+            if not self._validate_dataframe(df, required_columns):
+                return None
+
+            # Conversion des données en float
+            df_clean = df.copy()
+            df_clean['taux_dept'] = df_clean['taux_dept'].astype(float)
+
+            # Définition des types d'activités commerciales et leur sensibilité aux différents crimes
+            business_types = {
+                'Commerce de détail': {'Vols': 0.9, 'Cambriolages': 0.8, 'Destructions': 0.6},
+                'Restauration': {'Vols': 0.7, 'Cambriolages': 0.6, 'Destructions': 0.8},
+                'Services financiers': {'Vols': 1.0, 'Cambriolages': 0.9, 'Destructions': 0.4},
+                'Grande distribution': {'Vols': 0.8, 'Cambriolages': 0.7, 'Destructions': 0.5},
+                'Commerce de luxe': {'Vols': 1.0, 'Cambriolages': 1.0, 'Destructions': 0.7}
+            }
+
+            # Création de la matrice d'impact
+            impact_matrix = []
+            business_labels = list(business_types.keys())
+            crime_categories = ['Vols', 'Cambriolages', 'Destructions']
+
+            for business in business_labels:
+                row = []
+                for crime in crime_categories:
+                    # Calcul de l'impact en tenant compte du taux et de la sensibilité
+                    taux_moyen = float(df_clean[df_clean['type_crime'].str.contains(crime, case=False)]['taux_dept'].mean())
+                    sensibilite = business_types[business][crime]
+                    impact = taux_moyen * sensibilite
+                    row.append(impact)
+                impact_matrix.append(row)
+
+            # Création de la heatmap avec une colorscale personnalisée
+            colorscale = [
+                [0.0, '#198754'],      # Vert pour impact très faible
+                [0.25, '#90EE90'],     # Vert clair pour impact faible
+                [0.5, '#ffc107'],      # Jaune pour impact moyen
+                [0.75, '#ff7f50'],     # Orange pour impact élevé
+                [1.0, '#dc3545']       # Rouge pour impact très élevé
+            ]
+
+            # Création de la heatmap
+            fig = go.Figure(data=go.Heatmap(
+                z=impact_matrix,
+                x=crime_categories,
+                y=business_labels,
+                colorscale=colorscale,
+                colorbar=dict(
+                    title="Indice d'impact",
+                    titleside="right",
+                    ticktext=["Très faible", "Faible", "Moyen", "Élevé", "Très élevé"],
+                    tickvals=[min(min(row) for row in impact_matrix),
+                            min(min(row) for row in impact_matrix) + (max(max(row) for row in impact_matrix) - min(min(row) for row in impact_matrix))*0.25,
+                            min(min(row) for row in impact_matrix) + (max(max(row) for row in impact_matrix) - min(min(row) for row in impact_matrix))*0.5,
+                            min(min(row) for row in impact_matrix) + (max(max(row) for row in impact_matrix) - min(min(row) for row in impact_matrix))*0.75,
+                            max(max(row) for row in impact_matrix)],
+                    tickmode="array",
+                    thickness=5,
+                    len=0.75,
+                    y=0.5
+                ),
+                hoverongaps=False,
+                hovertemplate=(
+                    "<b>Secteur: %{y}</b><br>" +
+                    "<b>Type de crime: %{x}</b><br>" +
+                    "Indice d'impact: %{z:.2f}<br>" +
+                    "<extra></extra>"
+                )
+            ))
+
+            # Mise en page améliorée
+            fig.update_layout(
+                title={
+                    'text': "Impact des risques par secteur d'activité",
+                    'y': 0.95,
+                    'x': 0.5,
+                    'xanchor': 'center',
+                    'yanchor': 'top',
+                    'font': dict(size=24)
+                },
+                height=600,
+                margin=dict(t=100, l=150, r=150, b=100),
+                xaxis=dict(
+                    title="Types de crimes",
+                    title_font=dict(size=14),
+                    tickfont=dict(size=12)
+                ),
+                yaxis=dict(
+                    title="Secteurs d'activité",
+                    title_font=dict(size=14),
+                    tickfont=dict(size=12)
+                )
+            )
+
+            # Ajout de la légende explicative
+            fig.add_annotation(
+                text=(
+                    "<b>Guide de lecture :</b><br>" +
+                    "• L'indice d'impact combine deux facteurs :<br>" +
+                    "  1. Le taux d'incidents dans la zone<br>" +
+                    "  2. La vulnérabilité spécifique du secteur<br>" +
+                    "• Plus la couleur tend vers le rouge,<br>" +
+                    "  plus l'impact est important"
+                ),
+                xref="paper", yref="paper",
+                x=-0.5,
+                y=-0.25,
+                showarrow=False,
+                font=dict(size=12),
+                align="left",
+                bgcolor="rgba(255, 255, 255, 0.0)",
+                borderpad=4
+            )
+
+            return fig
+        except Exception as e:
+            logger.error(f"Erreur lors de la création de la heatmap d'impact: {str(e)}")
+            logger.exception("Détails complets de l'erreur:")
+            return None
+    
+    def create_business_zone_assessment(self, df: pd.DataFrame) -> Optional[go.Figure]:
+        """Crée une évaluation des zones commerciales avec indicateurs business"""
+        try:
+            required_columns = ['type_crime', 'taux_dept', 'niveau_risque', 'annee', 'taux_national']
+            if not self._validate_dataframe(df, required_columns):
+                return None
+
+            # Sélection des données les plus récentes
+            latest_year = df['annee'].max()
+            latest_data = df[df['annee'] == latest_year].copy()
+            
+            # Conversion explicite des colonnes en float
+            numeric_cols = ['taux_dept', 'taux_national']
+            for col in numeric_cols:
+                latest_data[col] = latest_data[col].astype(float)
+
+            # 1. Calcul du Risque commercial
+            # Augmentation du coefficient de 6 à 8 pour être plus strict
+            taux_moyen = latest_data['taux_dept'].mean()
+            risk_score = max(0, 100 - (taux_moyen * 8))
+
+            # 2. Calcul de l'Attractivité zone
+            commercial_crimes = latest_data[
+                latest_data['type_crime'].str.contains('Vol|Cambrio|Destruction', case=False)
+            ]
+            
+            if not commercial_crimes.empty:
+                taux_commercial = commercial_crimes['taux_dept'].mean()
+                # Augmentation du coefficient de 6 à 7.5 pour être plus strict
+                attractivity_score = max(0, 100 - (taux_commercial * 7.5))
+            else:
+                attractivity_score = 50
+
+            # 3. Calcul de la Sécurité globale
+            # Augmentation des poids pour les crimes graves
+            crime_weights = {
+                'Vols': 1.5,
+                'Cambriolages': 2.5,  # Augmenté de 2.0 à 2.5
+                'Destruction': 1.2,    # Augmenté de 1.0 à 1.2
+                'Violence': 3.0        # Augmenté de 2.5 à 3.0
+            }
+            
+            weighted_taux = 0
+            total_weight = 0
+            
+            for crime_type, weight in crime_weights.items():
+                crimes = latest_data[latest_data['type_crime'].str.contains(crime_type, case=False)]
+                if not crimes.empty:
+                    weighted_taux += crimes['taux_dept'].mean() * weight
+                    total_weight += weight
+            
+            if total_weight > 0:
+                avg_weighted_taux = weighted_taux / total_weight
+                # Augmentation du coefficient de 5 à 6.5 pour être plus strict
+                security_score = max(0, 100 - (avg_weighted_taux * 6.5))
+            else:
+                security_score = 50
+
+            # Préparation des métriques pour l'affichage
+            business_metrics = {
+                'Risque commercial': {
+                    'score': risk_score,
+                    'color': '#0d6efd',
+                    'description': f"Taux moyen: {taux_moyen:.1f}‰"
+                },
+                'Attractivité zone': {
+                    'score': attractivity_score,
+                    'color': '#198754',
+                    'description': f"Taux des crimes commerciaux: {taux_commercial:.1f}‰"
+                },
+                'Sécurité globale': {
+                    'score': security_score,
+                    'color': '#dc3545',
+                    'description': f"Taux pondéré: {avg_weighted_taux:.1f}‰"
+                }
+            }
+
+            # Création du graphique
+            fig = go.Figure()
+
+            # Ajout des barres pour chaque métrique
+            x_pos = 0
+            for metric_name, metric_data in business_metrics.items():
+                fig.add_trace(go.Bar(
+                    x=[x_pos],
+                    y=[metric_data['score']],
+                    name=metric_name,
+                    marker_color=metric_data['color'],
+                    text=[f"{metric_data['score']:.1f}"],
+                    textposition='auto',
+                    width=0.8,
+                    hovertemplate=(
+                        f"<b>{metric_name}</b><br>" +
+                        f"{metric_data['description']}<br>" +
+                        "Score: %{y:.1f}/100<br>" +
+                        "<extra></extra>"
+                    )
+                ))
+                x_pos += 1
+
+            # Ajout des seuils
+            seuils = [
+                {'score': 60, 'color': 'red', 'style': 'dash', 'text': 'Seuil critique'},
+                {'score': 75, 'color': 'orange', 'style': 'dash', 'text': 'Seuil de vigilance'},
+                {'score': 85, 'color': 'green', 'style': 'dash', 'text': 'Objectif recommandé'}
+            ]
+
+            for seuil in seuils:
+                fig.add_shape(
+                    type='line',
+                    x0=-0.5,
+                    x1=2.5,
+                    y0=seuil['score'],
+                    y1=seuil['score'],
+                    line=dict(
+                        color=seuil['color'],
+                        width=2,
+                        dash=seuil['style']
+                    )
+                )
+                # Ajout du texte du seuil
+                fig.add_annotation(
+                    text=f"{seuil['text']}",
+                    xref="paper",
+                    yref="y",
+                    x=1.1,
+                    y=seuil['score'],
+                    showarrow=False,
+                    font=dict(size=12, color=seuil['color'])
+                )
+
+            # Mise en page
+            fig.update_layout(
+                title={
+                    'text': "Évaluation des zones d'activité commerciale",
+                    'y': 0.95,
+                    'x': 0.5,
+                    'xanchor': 'center',
+                    'yanchor': 'top'
+                },
+                xaxis=dict(
+                    ticktext=list(business_metrics.keys()),
+                    tickvals=list(range(len(business_metrics))),
+                    title=""
+                ),
+                yaxis=dict(
+                    title="Score sur 100",
+                    range=[0, 100]
+                ),
+                showlegend=False,
+                height=500,
+                margin=dict(t=100, l=50, r=200, b=100)  # Augmenté la marge droite pour les annotations
+            )
+
+            # Ajout des annotations explicatives pour chaque score
+            fig.add_annotation(
+                text=(
+                    "<b>Interprétation des scores</b><br><br>" +
+                    "• > 85 : Zone favorable<br>" +
+                    "• 75-85 : Zone à surveiller<br>" +
+                    "• 60-75 : Zone sensible<br>" +
+                    "• < 60 : Zone critique"
+                ),
+                xref="paper",
+                yref="paper",
+                x=1.6,
+                y=-0.3,
+                showarrow=False,
+                font=dict(size=12),
+                align="left",
+                bgcolor="white",
+                bordercolor="black",
+                borderwidth=1,
+                borderpad=4
+            )
+
+            return fig
+        except Exception as e:
+            logger.error(f"Erreur lors de la création de l'évaluation des zones: {str(e)}")
+            logger.exception("Détails complets de l'erreur:")
             return None

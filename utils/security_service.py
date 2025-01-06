@@ -19,7 +19,6 @@ class SecurityService:
         department: str,
         year: int,
         department_dest: str = None,
-        month: str = None,
         crime_type: str = None,
         radius: int = None
     ) -> Tuple[pd.DataFrame, str, gr.Plot, gr.Plot, gr.Plot, gr.Plot]:
@@ -32,13 +31,27 @@ class SecurityService:
             
             # Obtenir les données et recommandations
             df, recommendations = self._get_service_data(
-                service, department, year, department_dest, month, crime_type, radius
+                service, department, full_year, department_dest, crime_type, radius
             )
             
             if df.empty:
                 return (df, "Aucune donnée disponible", *empty_plots)
                 
             try:
+                if service == "BusinessSecurity":
+                    plots = empty_plots
+                    
+                    # Création de la heatmap d'impact business
+                    impact_fig = self.visualizer.create_business_impact_heatmap(df)
+                    if impact_fig is not None:
+                        plots[0] = gr.Plot(impact_fig)
+                    
+                    # Création de l'évaluation des zones
+                    zone_fig = self.visualizer.create_business_zone_assessment(df)
+                    if zone_fig is not None:
+                        plots[1] = gr.Plot(zone_fig)
+                    
+                    return (df, recommendations, *plots)
                 if service == "AlerteVoisinage+":
                     plots = empty_plots
                     
@@ -150,23 +163,30 @@ class SecurityService:
         year: int,
         department_dest: str = None,
         month: str = None,
-        crime_type: str = None,
+        crime_type: str = None,  # Gardé pour compatibilité avec les autres services
         radius: int = None
     ) -> Tuple[pd.DataFrame, str]:
         """Get the service specific data"""
-        if service == "TransportSécurité":
-            return self._transport_security(department, department_dest, year, month)
-        elif service == "Sécurité Immobilière":
-            return self._real_estate_security(department, year)
-        elif service == "AlerteVoisinage+":
-            return self._neighborhood_alert(department, year, radius)
-        elif service == "BusinessSecurity":
-            return self._business_security(department, year, crime_type)
-        elif service == "OptimAssurance":
-            return self._insurance_optimization(department, year)
-        else:
-            return pd.DataFrame(), "Service non reconnu"
-
+        try:
+            if service == "TransportSécurité":
+                return self._transport_security(department, department_dest, year, month)
+            elif service == "Sécurité Immobilière":
+                return self._real_estate_security(department, year)
+            elif service == "AlerteVoisinage+":
+                return self._neighborhood_alert(department, year, radius)
+            elif service == "BusinessSecurity":
+                # Pour BusinessSecurity, on ignore les paramètres supplémentaires
+                return self._business_security(department, year)
+            elif service == "OptimAssurance":
+                return self._insurance_optimization(department, year)
+            else:
+                logger.warning(f"Service non reconnu: {service}")
+                return pd.DataFrame(), "Service non reconnu"
+        except Exception as e:
+            logger.error(f"Erreur dans _get_service_data: {str(e)}")
+            logger.exception("Détails de l'erreur:")
+            return pd.DataFrame(), f"Erreur: {str(e)}"
+        
     def _real_estate_security(self, department: str, year: int) -> Tuple[pd.DataFrame, str]:
         """Analyse les métriques de sécurité immobilière"""
         query = """
@@ -300,40 +320,72 @@ class SecurityService:
         recommendations = self._generate_alert_recommendations(df)
         return df, recommendations
 
-    def _business_security(self, department: str, year: int, crime_type: str) -> Tuple[pd.DataFrame, str]:
-        """Analyze business security risks"""
+    def _business_security(self, department: str, year: int = None) -> Tuple[pd.DataFrame, str]:
+        """Analyze business security risks with historical context"""
+        logger.info(f"Exécution de business_security pour dept={department}")
+        
         query = """
-        WITH BusinessRisks AS (
+        WITH 
+        -- Statistiques nationales
+        NationalStats AS (
             SELECT 
-                d.code_departement,
                 c.type_crime,
-                c.nombre_faits,
-                s.taux_pour_mille,
-                d.population,
-                d.logements,
-                CAST(c.nombre_faits AS DECIMAL(10,4)) / NULLIF(d.population, 0) * 10000 as risque_commercial
+                c.annee,
+                SUM(c.nombre_faits) as total_faits_national,
+                SUM(d.population) as total_population_national,
+                CAST(SUM(c.nombre_faits) * 1000.0 / NULLIF(SUM(d.population), 0) AS DECIMAL(10,2)) as taux_national
             FROM crimes c
             JOIN statistiques s ON c.id_crime = s.id_crime
             JOIN departements d ON s.code_departement = d.code_departement
-            WHERE d.code_departement = %s 
-            AND c.annee = %s
-            AND (%s IS NULL OR c.type_crime = %s)
+            GROUP BY c.type_crime, c.annee
+        ),
+        -- Statistiques départementales
+        DepartmentStats AS (
+            SELECT 
+                d.code_departement,
+                d.population,
+                d.logements,
+                c.type_crime,
+                c.annee,
+                c.nombre_faits,
+                CAST(c.nombre_faits * 1000.0 / NULLIF(d.population, 0) AS DECIMAL(10,2)) as taux_dept
+            FROM crimes c
+            JOIN statistiques s ON c.id_crime = s.id_crime
+            JOIN departements d ON s.code_departement = d.code_departement
+            WHERE d.code_departement = %s
         )
         SELECT 
-            *,
+            ds.*,
+            ns.taux_national,
+            -- Calcul de l'écart avec la moyenne nationale
+            CAST(((ds.taux_dept - ns.taux_national) / NULLIF(ns.taux_national, 0)) * 100 AS DECIMAL(10,2)) as variation_nationale,
+            -- Classification du risque
             CASE 
-                WHEN risque_commercial > (SELECT AVG(risque_commercial) * 2 FROM BusinessRisks) THEN 'CRITIQUE'
-                WHEN risque_commercial > (SELECT AVG(risque_commercial) FROM BusinessRisks) THEN 'ÉLEVÉ'
+                WHEN ds.taux_dept > (ns.taux_national * 1.5) THEN 'CRITIQUE'
+                WHEN ds.taux_dept > (ns.taux_national * 1.2) THEN 'ÉLEVÉ'
                 ELSE 'MODÉRÉ'
-            END as niveau_risque_commercial
-        FROM BusinessRisks
-        ORDER BY risque_commercial DESC;
+            END as niveau_risque
+        FROM DepartmentStats ds
+        JOIN NationalStats ns ON ds.type_crime = ns.type_crime 
+            AND ds.annee = ns.annee
+        ORDER BY ds.annee DESC, ds.taux_dept DESC;
         """
         
-        df = self.db.execute_query(query, (department, year, crime_type, crime_type))
-        recommendations = self._generate_business_recommendations(df)
-        return df, recommendations
-
+        try:
+            df = self.db.execute_query(query, (department,))
+            
+            logger.info(f"Données récupérées: {len(df)} lignes")
+            if df.empty:
+                logger.warning("Aucune donnée trouvée pour les paramètres donnés")
+                return df, "Aucune donnée trouvée pour ces critères"
+                
+            recommendations = self._generate_business_recommendations(df)
+            return df, recommendations
+        except Exception as e:
+            logger.error(f"Erreur dans _business_security: {str(e)}")
+            logger.exception("Détails de l'erreur:")
+            return pd.DataFrame(), "Erreur lors de l'analyse des données commerciales"
+    
     def _insurance_optimization(self, department: str, year: int) -> Tuple[pd.DataFrame, str]:
         """Calculate insurance risk scores"""
         query = """
