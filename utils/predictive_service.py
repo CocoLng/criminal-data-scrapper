@@ -1,293 +1,461 @@
 import pandas as pd
-from typing import Tuple, Dict, Any
+from typing import Tuple
 from database.database import DatabaseConnection
+from view.predictive_view import PredictiveVisualization
 import logging
-import math
+import gradio as gr
 
 logger = logging.getLogger(__name__)
 
 class PredictiveService:
     def __init__(self):
         self.db = DatabaseConnection()
-
+        self.visualizer = PredictiveVisualization()
+        
     def process_request(
         self,
         service: str,
+        dept: str = None,
         crime_type: str = None,
-        department: str = None,
-        horizon: str = None
-    ) -> Tuple[pd.DataFrame, str]:
-        """Process predictive analysis requests"""
+        target_year: int = 25
+    ) -> Tuple[pd.DataFrame, str, gr.Plot, gr.Plot]:
+        """Traite les requêtes d'analyse prédictive"""
         try:
-            if service == "Prévision Saisonnière":
-                return self._seasonal_prediction(crime_type, department)
-            elif service == "PolicePrédictive":
-                return self._predictive_policing(department, horizon)
+            empty_plots = [gr.Plot(), gr.Plot()]
+            
+            if service == "Projection Criminelle":
+                # Vérification des paramètres
+                if not dept:
+                    return pd.DataFrame(), "Erreur: Département requis", *empty_plots
+                    
+                # Conversion et validation de l'année cible
+                try:
+                    target_year = int(target_year)
+                    if target_year < 24 or target_year > 30:
+                        return pd.DataFrame(), "Erreur: L'année de prédiction doit être entre 24 et 30", *empty_plots
+                except ValueError:
+                    return pd.DataFrame(), "Erreur: Année invalide", *empty_plots
+                    
+                df, recommendations = self._projection_criminelle(dept, crime_type, target_year)
+                if df.empty:
+                    return df, recommendations, *empty_plots
+                    
+                plots = empty_plots
+                # Création de la courbe de projection
+                projection = self.visualizer.create_projection_curve(df)
+                if projection is not None:
+                    plots[0] = gr.Plot(projection)
+                
+                # Création de la heatmap des prédictions
+                heatmap = self.visualizer.create_prediction_heatmap(df)
+                if heatmap is not None:
+                    plots[1] = gr.Plot(heatmap)
+                    
+                return df, recommendations, *plots
+                
+            elif service == "Analyse des Risques Émergents":
+                if not dept:
+                    return pd.DataFrame(), "Erreur: Département requis", *empty_plots
+                    
+                df, recommendations = self._analyse_risques(dept)
+                if df.empty:
+                    return df, recommendations, *empty_plots
+                    
+                plots = empty_plots
+                variations = self.visualizer.create_risk_variations(df)
+                if variations is not None:
+                    plots[0] = gr.Plot(variations)
+                
+                correlations = self.visualizer.create_crime_correlations(df)
+                if correlations is not None:
+                    plots[1] = gr.Plot(correlations)
+                    
+                return df, recommendations, *plots
+                
             else:
-                return pd.DataFrame(), "Service non reconnu"
+                return pd.DataFrame(), "Service non reconnu", *empty_plots
+                
         except Exception as e:
-            logger.error(f"Error in PredictiveService: {e}")
-            return pd.DataFrame(), f"Erreur: {str(e)}"
+            logger.error(f"Erreur dans process_request: {str(e)}")
+            return pd.DataFrame(), f"Erreur: {str(e)}", *empty_plots
 
-    def _seasonal_prediction(self, crime_type: str, department: str) -> Tuple[pd.DataFrame, str]:
-        """Generate seasonal predictions for crime trends"""
+    def _projection_criminelle(self, department: str, crime_type: str = None, target_year: int = 25) -> Tuple[pd.DataFrame, str]:
+        """Analyse et projette l'évolution des crimes jusqu'à l'année cible"""
         query = """
-        WITH SeasonalData AS (
-            SELECT 
-                d.code_departement,
-                c.type_crime,
-                c.annee,
-                CASE 
-                    WHEN EXTRACT(MONTH FROM DATE(CONCAT(c.annee, '-01-01'))) IN (12,1,2) THEN 'HIVER'
-                    WHEN EXTRACT(MONTH FROM DATE(CONCAT(c.annee, '-01-01'))) IN (3,4,5) THEN 'PRINTEMPS'
-                    WHEN EXTRACT(MONTH FROM DATE(CONCAT(c.annee, '-01-01'))) IN (6,7,8) THEN 'ETE'
-                    ELSE 'AUTOMNE'
-                END as saison,
-                SUM(c.nombre_faits) as total_faits,
-                AVG(s.taux_pour_mille) as taux_moyen
+        WITH RECURSIVE Annees AS (
+            -- Sélection de la plus petite année dans les données
+            SELECT MIN(c.annee) as annee
             FROM crimes c
             JOIN statistiques s ON c.id_crime = s.id_crime
-            JOIN departements d ON s.code_departement = d.code_departement
-            WHERE c.type_crime = %s 
-            AND d.code_departement = %s
-            GROUP BY d.code_departement, c.type_crime, c.annee, saison
+            WHERE s.code_departement = %s
+            AND (c.type_crime = %s OR %s IS NULL)
+            
+            UNION ALL
+            
+            SELECT annee + 1
+            FROM Annees
+            WHERE annee < %s  -- Utilisation de l'année cible
         ),
-        SeasonalStats AS (
+        BaseData AS (
             SELECT 
+                s.code_departement,
+                c.type_crime,
+                c.annee,
+                s.taux_pour_mille
+            FROM crimes c
+            JOIN statistiques s ON c.id_crime = s.id_crime
+            WHERE s.code_departement = %s
+            AND (c.type_crime = %s OR %s IS NULL)
+        ),
+        RegressionStats AS (
+            SELECT
                 code_departement,
                 type_crime,
-                saison,
-                AVG(total_faits) as moyenne_faits,
-                STDDEV(total_faits) as ecart_type,
-                (
-                    (COUNT(*) * SUM(annee * total_faits) - SUM(annee) * SUM(total_faits)) /
-                    (COUNT(*) * SUM(annee * annee) - SUM(annee) * SUM(annee))
-                ) as tendance,
-                (
-                    POW(
-                        (COUNT(*) * SUM(annee * total_faits) - SUM(annee) * SUM(total_faits)) /
-                        SQRT(
-                            (COUNT(*) * SUM(annee * annee) - POW(SUM(annee), 2)) *
-                            (COUNT(*) * SUM(total_faits * total_faits) - POW(SUM(total_faits), 2))
+                COUNT(*) as n_points,
+                AVG(annee) as x_mean,
+                AVG(taux_pour_mille) as y_mean,
+                AVG(annee * taux_pour_mille) as xy_mean,
+                AVG(annee * annee) as x2_mean,
+                AVG(taux_pour_mille * taux_pour_mille) as y2_mean,
+                STD(taux_pour_mille) as std_dev
+            FROM BaseData
+            GROUP BY code_departement, type_crime
+            HAVING COUNT(*) > 1
+        ),
+        RegressionParams AS (
+            SELECT 
+                r.*,
+                (xy_mean - x_mean * y_mean) / NULLIF(x2_mean - x_mean * x_mean, 0) as slope,
+                POWER(
+                    (xy_mean - x_mean * y_mean) / 
+                    SQRT(
+                        NULLIF(
+                            (x2_mean - x_mean * x_mean) * 
+                            (y2_mean - y_mean * y_mean),
+                            0
                         )
-                    , 2)
-                ) as r2,
-                MAX(annee) as derniere_annee
-            FROM SeasonalData
-            GROUP BY code_departement, type_crime, saison
-        ),
-        PredictionBase AS (
-            SELECT 
-                *,
-                moyenne_faits + (tendance * 1) as prediction_prochaine_saison,
-                CASE 
-                    WHEN ABS(tendance / NULLIF(moyenne_faits, 0)) > 0.1 THEN
-                        CASE 
-                            WHEN tendance > 0 THEN 'HAUSSE_SIGNIFICATIVE'
-                            ELSE 'BAISSE_SIGNIFICATIVE'
-                        END
-                    ELSE 'STABLE'
-                END as tendance_interpretation,
-                ecart_type / NULLIF(moyenne_faits, 0) as coefficient_variation
-            FROM SeasonalStats
-        )
-        SELECT 
-            *,
-            CASE 
-                WHEN coefficient_variation > 0.5 THEN 'FORTE'
-                WHEN coefficient_variation > 0.25 THEN 'MOYENNE'
-                ELSE 'FAIBLE'
-            END as volatilite,
-            prediction_prochaine_saison - 2 * ecart_type as borne_inf_prediction,
-            prediction_prochaine_saison + 2 * ecart_type as borne_sup_prediction
-        FROM PredictionBase
-        ORDER BY saison;
-        """
-        
-        df = self.db.execute_query(query, (crime_type, department))
-        recommendations = self._generate_seasonal_recommendations(df)
-        return df, recommendations
-
-    def _predictive_policing(self, department: str, horizon: str) -> Tuple[pd.DataFrame, str]:
-        """Generate predictive policing analysis with fixed window functions"""
-        horizon_months = self._parse_horizon(horizon)
-        
-        query = """
-        WITH HistoricalPatterns AS (
-            SELECT 
-                d.code_departement,
-                c.type_crime,
-                c.annee,
-                EXTRACT(MONTH FROM DATE(CONCAT(c.annee, '-01-01'))) as mois,
-                c.nombre_faits,
-                s.taux_pour_mille,
-                AVG(c.nombre_faits) OVER (
-                    PARTITION BY d.code_departement, c.type_crime 
-                    ORDER BY c.annee, EXTRACT(MONTH FROM DATE(CONCAT(c.annee, '-01-01')))
-                    ROWS BETWEEN 3 PRECEDING AND CURRENT ROW
-                ) as moyenne_mobile
-            FROM crimes c
-            JOIN statistiques s ON c.id_crime = s.id_crime
-            JOIN departements d ON s.code_departement = d.code_departement
-            WHERE d.code_departement = %s
-        ),
-        TimeSeriesData AS (
-            SELECT 
-                code_departement,
-                type_crime,
-                annee,
-                mois,
-                nombre_faits,
-                moyenne_mobile,
-                @row_num := @row_num + 1 AS x_value
-            FROM HistoricalPatterns
-            CROSS JOIN (SELECT @row_num := 0) AS vars
-            ORDER BY annee, mois
-        ),
-        MovingAverages AS (
-            SELECT 
-                *,
-                AVG(nombre_faits) OVER (
-                    PARTITION BY code_departement, type_crime
-                    ORDER BY annee, mois
-                    ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
-                ) as y_avg,
-                AVG(x_value) OVER (
-                    PARTITION BY code_departement, type_crime
-                    ORDER BY annee, mois
-                    ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
-                ) as x_avg
-            FROM TimeSeriesData
-        ),
-        TrendCalculation AS (
-            SELECT 
-                *,
-                SUM((x_value - x_avg) * (nombre_faits - y_avg)) OVER (
-                    PARTITION BY code_departement, type_crime
-                    ORDER BY annee, mois
-                    ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
-                ) / NULLIF(
-                    SUM(POW(x_value - x_avg, 2)) OVER (
-                        PARTITION BY code_departement, type_crime
-                        ORDER BY annee, mois
-                        ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
                     ),
-                    0
-                ) as tendance_locale
-            FROM MovingAverages
+                    2
+                ) as r_squared
+            FROM RegressionStats r
         ),
-        SeasonalFactors AS (
+        AllYearsCombined AS (
             SELECT 
-                *,
-                nombre_faits - AVG(nombre_faits) OVER (
-                    PARTITION BY code_departement, type_crime, annee
-                ) as composante_saisonniere
-            FROM TrendCalculation
+                bd.code_departement,
+                bd.type_crime,
+                a.annee
+            FROM BaseData bd
+            CROSS JOIN Annees a
+            GROUP BY bd.code_departement, bd.type_crime, a.annee
+        ),
+        LastHistoricalYear AS (
+            SELECT MAX(annee) as derniere_annee
+            FROM BaseData
+        ),
+        Projections AS (
+            SELECT 
+                a.code_departement,
+                a.type_crime,
+                a.annee,
+                ROUND(
+                    (r.y_mean - (r.slope * r.x_mean)) + (r.slope * a.annee),
+                    2
+                ) as projection,
+                ROUND(
+                    (r.y_mean - (r.slope * r.x_mean)) + (r.slope * a.annee)
+                    - (1.96 * r.std_dev),
+                    2
+                ) as lower_bound,
+                ROUND(
+                    (r.y_mean - (r.slope * r.x_mean)) + (r.slope * a.annee)
+                    + (1.96 * r.std_dev),
+                    2
+                ) as upper_bound,
+                r.slope,
+                r.n_points,
+                COALESCE(r.r_squared, 0) as r_squared,
+                CASE 
+                    WHEN a.annee > (SELECT derniere_annee FROM LastHistoricalYear) THEN 'PROJECTION'
+                    ELSE 'HISTORIQUE'
+                END as data_type
+            FROM AllYearsCombined a
+            JOIN RegressionParams r ON a.code_departement = r.code_departement 
+                AND a.type_crime = r.type_crime
+        ),
+        FinalData AS (
+            SELECT 
+                p.*,
+                CASE 
+                    WHEN p.data_type = 'HISTORIQUE' THEN 
+                        (SELECT b.taux_pour_mille 
+                        FROM BaseData b 
+                        WHERE b.code_departement = p.code_departement 
+                        AND b.type_crime = p.type_crime 
+                        AND b.annee = p.annee)
+                    ELSE p.projection
+                END as final_value
+            FROM Projections p
         )
         SELECT 
             code_departement,
             type_crime,
             annee,
-            mois,
-            nombre_faits,
-            moyenne_mobile,
-            tendance_locale,
-            composante_saisonniere,
-            moyenne_mobile + (tendance_locale * %s) + 
-            COALESCE(
-                AVG(composante_saisonniere) OVER (
-                    PARTITION BY code_departement, type_crime, mois
-                ),
-                0
-            ) as prediction_base,
-            STDDEV(nombre_faits) OVER (
-                PARTITION BY code_departement, type_crime
-                ORDER BY annee, mois
-                ROWS BETWEEN 12 PRECEDING AND CURRENT ROW
-            ) * 1.96 as intervalle_confiance,
-            CASE 
-                WHEN tendance_locale > 0 AND ABS(tendance_locale) > 0.1 THEN 'HAUSSE'
-                WHEN tendance_locale < 0 AND ABS(tendance_locale) > 0.1 THEN 'BAISSE'
-                ELSE 'STABLE'
-            END as tendance_prevue,
-            CASE 
-                WHEN moyenne_mobile > AVG(moyenne_mobile) OVER (PARTITION BY code_departement)
-                THEN 'VIGILANCE ACCRUE'
-                ELSE 'NORMAL'
-            END as niveau_vigilance
-        FROM SeasonalFactors
-        WHERE annee = (SELECT MAX(annee) FROM HistoricalPatterns)
-        ORDER BY prediction_base DESC;
+            ROUND(COALESCE(final_value, projection), 2) as projection,
+            lower_bound,
+            upper_bound,
+            slope,
+            n_points,
+            r_squared,
+            data_type
+        FROM FinalData
+        ORDER BY type_crime, annee;
         """
         
-        df = self.db.execute_query(query, (department, horizon_months))
-        recommendations = self._generate_policing_recommendations(df)
-        return df, recommendations
+        try:
+            # Ajout de l'année cible dans les paramètres de la requête
+            params = (
+                department, crime_type, crime_type, 
+                target_year,  # Nouvelle année cible
+                department, crime_type, crime_type  # Répétition des paramètres pour BaseData
+            )
+            df = self.db.execute_query(query, params)
+            recommendations = self._generate_projection_recommendations(df, target_year)
+            return df, recommendations
+                
+        except Exception as e:
+            logger.error(f"Erreur dans _projection_criminelle: {str(e)}")
+            return pd.DataFrame(), f"Erreur lors de l'analyse des projections: {str(e)}"
 
-    def _parse_horizon(self, horizon: str) -> int:
-        """Convert horizon string to number of months"""
-        if horizon == "1 mois":
-            return 1
-        elif horizon == "3 mois":
-            return 3
-        elif horizon == "6 mois":
-            return 6
-        elif horizon == "1 an":
-            return 12
-        return 3 # Défaut: 3 mois
-
-    def _generate_seasonal_recommendations(self, df: pd.DataFrame) -> str:
-        """Generate recommendations based on seasonal predictions"""
-        if df.empty:
-            return "Aucune donnée disponible pour les prédictions saisonnières"
-
-        recommendations = ["🔮 Prévisions saisonnières :"]
+    def _analyse_risques(self, department: str) -> Tuple[pd.DataFrame, str]:
+        """Analyse les tendances et corrélations entre types de crimes"""
+        query = """
+        WITH BaseData AS (
+            SELECT 
+                s.code_departement,
+                c.type_crime,
+                c.annee,
+                s.taux_pour_mille,
+                (
+                    SELECT taux_pour_mille 
+                    FROM statistiques s2 
+                    JOIN crimes c2 ON c2.id_crime = s2.id_crime
+                    WHERE s2.code_departement = s.code_departement 
+                    AND c2.type_crime = c.type_crime 
+                    AND c2.annee < c.annee 
+                    ORDER BY c2.annee DESC 
+                    LIMIT 1
+                ) as taux_precedent
+            FROM crimes c
+            JOIN statistiques s ON c.id_crime = s.id_crime
+            WHERE s.code_departement = %s
+        ),
+        GrowthStats AS (
+            SELECT 
+                code_departement,
+                type_crime,
+                AVG(
+                    CASE 
+                        WHEN taux_precedent IS NULL OR taux_precedent = 0 THEN 0
+                        ELSE (taux_pour_mille - taux_precedent) / taux_precedent
+                    END
+                ) as taux_croissance,
+                MAX(CASE WHEN annee = (SELECT MAX(annee) FROM BaseData b2 WHERE b2.type_crime = BaseData.type_crime) 
+                    THEN taux_pour_mille END) as derniere_valeur
+            FROM BaseData
+            GROUP BY code_departement, type_crime
+        ),
+        Projections AS (
+            SELECT 
+                code_departement,
+                type_crime,
+                taux_croissance,
+                derniere_valeur,
+                ROUND(
+                    derniere_valeur * (1 + taux_croissance),
+                    2
+                ) as projection_2024,
+                CASE
+                    WHEN taux_croissance > 0.1 THEN 'FORTE_HAUSSE'
+                    WHEN taux_croissance > 0.05 THEN 'HAUSSE_MODEREE'
+                    WHEN taux_croissance < -0.1 THEN 'FORTE_BAISSE'
+                    WHEN taux_croissance < -0.05 THEN 'BAISSE_MODEREE'
+                    ELSE 'STABLE'
+                END as tendance,
+                ROUND(
+                    taux_croissance * 100,
+                    2
+                ) as variation_projetee
+            FROM GrowthStats
+        ),
+        CorrelationData AS (
+            SELECT 
+                p1.code_departement,
+                p1.type_crime,
+                p1.taux_croissance,
+                p1.derniere_valeur,
+                p1.projection_2024,
+                p1.tendance,
+                p1.variation_projetee,
+                p2.type_crime as type_crime_2,
+                ROUND(
+                    (
+                        SELECT 
+                            (COUNT(*) * SUM(b1.taux_pour_mille * b2.taux_pour_mille) - 
+                            SUM(b1.taux_pour_mille) * SUM(b2.taux_pour_mille)) /
+                            SQRT(
+                                (COUNT(*) * SUM(b1.taux_pour_mille * b1.taux_pour_mille) - 
+                                POW(SUM(b1.taux_pour_mille), 2)) *
+                                (COUNT(*) * SUM(b2.taux_pour_mille * b2.taux_pour_mille) - 
+                                POW(SUM(b2.taux_pour_mille), 2))
+                            )
+                        FROM BaseData b1
+                        JOIN BaseData b2 ON b1.annee = b2.annee 
+                        WHERE b1.type_crime = p1.type_crime
+                        AND b2.type_crime = p2.type_crime
+                    ),
+                    2
+                ) as correlation
+            FROM Projections p1
+            CROSS JOIN Projections p2
+        )
+        SELECT 
+            code_departement,
+            type_crime,
+            type_crime_2,
+            taux_croissance,
+            derniere_valeur,
+            projection_2024,
+            tendance,
+            variation_projetee,
+            correlation
+        FROM CorrelationData
+        ORDER BY type_crime, type_crime_2;
+        """
         
-        # Analyse par saison
-        for _, row in df.iterrows():
-            recommendations.append(f"\n{row['saison']}:")
-            recommendations.append(
-                f"- Prévision: {row['prediction_prochaine_saison']:.0f} faits "
-                f"({row['tendance_interpretation']})"
-            )
-            recommendations.append(
-                f"- Intervalle de confiance: [{row['borne_inf_prediction']:.0f} - "
-                f"{row['borne_sup_prediction']:.0f}]"
-            )
-            recommendations.append(f"- Volatilité: {row['volatilite']}")
+        try:
+            if not department:
+                logger.error("Paramètre département manquant")
+                return pd.DataFrame(), "Erreur : Département non spécifié"
+                
+            logger.info(f"Exécution de l'analyse des risques pour le département {department}")
+            df = self.db.execute_query(query, (department,))
+            
+            if df.empty:
+                logger.warning(f"Aucune donnée trouvée pour le département {department}")
+                return df, f"Aucune donnée disponible pour le département {department}"
+                
+            recommendations = self._generate_risk_recommendations(df)
+            
+            logger.info(f"Analyse des risques terminée pour le département {department}")
+            return df, recommendations
+            
+        except Exception as e:
+            error_msg = f"Erreur dans _analyse_risques: {str(e)}"
+            logger.error(error_msg)
+            return pd.DataFrame(), f"Erreur lors de l'analyse des risques : {str(e)}"
 
-        # Recommandations générales
-        recommendations.append("\nRecommandations :")
-        for _, row in df.iterrows():
-            if row['tendance_interpretation'] == 'HAUSSE_SIGNIFICATIVE':
-                recommendations.append(
-                    f"⚠️ Renforcement conseillé pour {row['saison'].lower()}"
-                )
+    def _generate_projection_recommendations(self, df: pd.DataFrame, target_year: int) -> str:
+        """Génère des recommandations basées sur les projections
+        
+        Args:
+            df (pd.DataFrame): DataFrame contenant les données de projection
+            target_year (int): Année cible de la projection
+            
+        Returns:
+            str: Recommandations formatées
+        """
+        if df.empty:
+            return "Aucune donnée disponible pour l'analyse"
+
+        recommendations = [
+            f"📈 Analyse des projections - Département {df['code_departement'].iloc[0]} :"
+        ]
+
+        # Analyse des tendances par type de crime
+        for type_crime in df['type_crime'].unique():
+            crime_data = df[df['type_crime'] == type_crime]
+            last_historic = crime_data[crime_data['data_type'] == 'HISTORIQUE'].iloc[-1]
+            
+            # Obtention des données pour l'année cible
+            target_projection = crime_data[
+                (crime_data['data_type'] == 'PROJECTION') & 
+                (crime_data['annee'] == target_year)
+            ].iloc[0]
+            
+            variation = ((target_projection['projection'] - last_historic['projection']) / 
+                        last_historic['projection'] * 100)
+            
+            recommendations.append(f"\n{type_crime}:")
+            recommendations.append(
+                f"- Projection 20{target_year}: {target_projection['projection']:.1f}‰ "
+                f"({variation:+.1f}% vs. dernière valeur historique)"
+            )
+            
+            # Ajout de l'intervalle de confiance
+            recommendations.append(
+                f"- Intervalle de confiance: [{target_projection['lower_bound']:.1f} - "
+                f"{target_projection['upper_bound']:.1f}]‰"
+            )
+            
+            # Évaluation de la fiabilité basée sur R²
+            if target_projection['r_squared'] > 0.7:
+                recommendations.append("- ✅ Prédiction fiable (R² > 0.7)")
+            elif target_projection['r_squared'] > 0.5:
+                recommendations.append("- ⚠️ Prédiction moyennement fiable (R² > 0.5)")
+            else:
+                recommendations.append("- ❌ Prédiction peu fiable (R² < 0.5)")
+            
+            # Analyse de la tendance
+            if variation > 10:
+                recommendations.append("- 🔴 Forte augmentation projetée")
+            elif variation < -10:
+                recommendations.append("- 🔵 Forte diminution projetée")
+            elif abs(variation) <= 5:
+                recommendations.append("- ⚪ Tendance stable")
 
         return "\n".join(recommendations)
 
-    def _generate_policing_recommendations(self, df: pd.DataFrame) -> str:
-        """Generate recommendations based on predictive policing analysis"""
+    def _generate_risk_recommendations(self, df: pd.DataFrame) -> str:
+        """Génère des recommandations basées sur l'analyse des risques"""
         if df.empty:
-            return "Aucune donnée disponible pour les prédictions"
+            return "Aucune donnée disponible pour l'analyse"
 
-        recommendations = ["👮 Recommandations opérationnelles :"]
-        
-        # Analyse des zones prioritaires
-        high_priority = df[df['niveau_vigilance'] == 'VIGILANCE ACCRUE']
-        if not high_priority.empty:
-            recommendations.append("\nZones nécessitant une vigilance accrue :")
-            for _, zone in high_priority.iterrows():
+        recommendations = [
+            f"⚠️ Analyse des risques - Département {df['code_departement'].iloc[0]} :"
+        ]
+
+        # Analyse des tendances significatives
+        significant_risks = df[df['tendance'].isin(['FORTE_HAUSSE', 'FORTE_BAISSE'])]
+        if not significant_risks.empty:
+            recommendations.append("\nTendances significatives :")
+            for _, risk in significant_risks.iterrows():
                 recommendations.append(
-                    f"- {zone['type_crime']}: {zone['prediction_base']:.0f} faits prévus "
-                    f"(+{((zone['prediction_base']/zone['moyenne_mobile'] - 1) * 100):.1f}%)"
+                    f"- {risk['type_crime']}: {risk['tendance']} "
+                    f"(Variation projetée: {risk['variation_projetee']:+.1f}%)"
                 )
 
-        # Tendances générales
-        recommendations.append("\nTendances identifiées :")
-        for tendency in df['tendance_prevue'].unique():
-            types = df[df['tendance_prevue'] == tendency]['type_crime'].tolist()
-            if types:
-                recommendations.append(f"- {tendency}: {', '.join(types)}")
+        # Analyse des corrélations fortes
+        strong_correlations = df[abs(df['correlation']) > 0.7]
+        if not strong_correlations.empty:
+            recommendations.append("\nCorrélations significatives :")
+            for _, corr in strong_correlations.iterrows():
+                if corr['type_crime'] != corr['correlation']:
+                    recommendations.append(
+                        f"- {corr['type_crime']} et {corr['correlation']} "
+                        f"évoluent de manière similaire (corr: {abs(corr['correlation']):.2f})"
+                    )
+
+        # Identification des risques prioritaires
+        high_risks = df[
+            (df['variation_projetee'] > 20) & 
+            (df['derniere_valeur'] > df['derniere_valeur'].mean())
+        ]
+        if not high_risks.empty:
+            recommendations.append("\nPoints d'attention prioritaires :")
+            for _, risk in high_risks.iterrows():
+                recommendations.append(
+                    f"- {risk['type_crime']}: déjà supérieur à la moyenne et "
+                    f"projection en forte hausse (+{risk['variation_projetee']:.1f}%)"
+                )
 
         return "\n".join(recommendations)

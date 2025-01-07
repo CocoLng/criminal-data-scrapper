@@ -19,7 +19,9 @@ class InterfaceManager:
         self.security_service = SecurityService()
         self.territorial_service = TerritorialService()
         self.predictive_service = PredictiveService()
-        self.regions = sorted(self.db.get_distinct_values("departements", "code_region"))
+        self.regions = sorted(
+            self.db.get_distinct_values("departements", "code_region")
+        )
         self._load_initial_values()
 
     def _load_initial_values(self):
@@ -141,37 +143,39 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                         label="Type de crime",
                         visible=False,
                     )
-                    
+
                 security_button = gr.Button("Analyser")
 
                 # Fonction pour gérer la visibilité des champs en fonction du service sélectionné
                 def update_security_fields(service):
                     if service == "TransportSécurité":
                         return {
-                            dept_security: gr.update(visible=True, label="Département de départ"),
+                            dept_security: gr.update(
+                                visible=True, label="Département de départ"
+                            ),
                             dept_security_dest: gr.update(visible=True),
                             year_security: gr.update(visible=False),
-                            crime_type_security: gr.update(visible=False)
+                            crime_type_security: gr.update(visible=False),
                         }
                     elif service == "AlerteVoisinage":
                         return {
                             dept_security: gr.update(visible=True, label="Département"),
                             dept_security_dest: gr.update(visible=False),
                             year_security: gr.update(visible=True),
-                            crime_type_security: gr.update(visible=False)
+                            crime_type_security: gr.update(visible=False),
                         }
                     elif service == "BusinessSecurity":
                         return {
                             dept_security: gr.update(visible=True, label="Département"),
                             dept_security_dest: gr.update(visible=False),
-                            year_security: gr.update(visible=False)
+                            year_security: gr.update(visible=False),
                         }
                     else:
                         return {
                             dept_security: gr.update(visible=True, label="Département"),
                             dept_security_dest: gr.update(visible=False),
                             year_security: gr.update(visible=True),
-                            crime_type_security: gr.update(visible=False)
+                            crime_type_security: gr.update(visible=False),
                         }
 
                 # Connexion de la fonction de mise à jour avec le dropdown de service
@@ -193,22 +197,22 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                         choices=[
                             "Diagnostic Régional",
                             "Comparaison Inter-Régionale",
-                            "Évolution Régionale"
+                            "Évolution Régionale",
                         ],
-                        label="Service d'analyse territoriale"
+                        label="Service d'analyse territoriale",
                     )
 
                 with gr.Row():
                     region_reference = gr.Dropdown(
                         choices=interface_manager.regions,
                         label="Région de référence",
-                        value='75',
-                        visible=True
+                        value="75",
+                        visible=True,
                     )
                     region_comparison = gr.Dropdown(
                         choices=interface_manager.regions,
                         label="Région à comparer",
-                        visible=False
+                        visible=False,
                     )
 
                 territorial_button = gr.Button("Analyser")
@@ -217,47 +221,87 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                 def update_territorial_fields(service):
                     if service == "Comparaison Inter-Régionale":
                         return {
-                            region_reference: gr.update(visible=True, label="Région de référence"),
-                            region_comparison: gr.update(visible=True)
+                            region_reference: gr.update(
+                                visible=True, label="Région de référence"
+                            ),
+                            region_comparison: gr.update(visible=True),
                         }
                     else:
                         return {
                             region_reference: gr.update(visible=True, label="Région"),
-                            region_comparison: gr.update(visible=False)
+                            region_comparison: gr.update(visible=False),
                         }
 
                 # Connexion de la fonction de mise à jour avec le dropdown de service
                 territorial_service.change(
                     fn=update_territorial_fields,
                     inputs=[territorial_service],
-                    outputs=[region_reference, region_comparison]
+                    outputs=[region_reference, region_comparison],
                 )
 
             # Onglet Prédiction
             with gr.Tab("Prédiction"):
                 with gr.Row():
                     prediction_service = gr.Dropdown(
-                        choices=["Prévision Saisonnière", "PolicePrédictive"],
+                        choices=[
+                            "Projection Criminelle",
+                            "Analyse des Risques Émergents",
+                        ],
                         label="Service de prédiction",
+                        value="Projection Criminelle",
                     )
 
                 with gr.Row():
-                    crime_type_pred = gr.Dropdown(
-                        choices=interface_manager.types_crimes, label="Type de crime"
-                    )
                     dept_pred = gr.Dropdown(
-                        choices=interface_manager.departements, label="Département"
+                        choices=interface_manager.departements,
+                        label="Département",
+                        value=interface_manager.departements[0]
+                        if interface_manager.departements
+                        else None,
+                    )
+                    crime_type_pred = gr.Dropdown(
+                        choices=interface_manager.types_crimes,
+                        label="Type de crime",
+                        value=interface_manager.types_crimes[0]
+                        if interface_manager.types_crimes
+                        else None,
+                        visible=True,
+                    )
+                    target_year = gr.Number(
+                        label="Année finale de prédiction (ex: 26 pour 2026)",
+                        value=25,
+                        minimum=24,
+                        maximum=30,
+                        step=1,
+                        precision=0,  # Pour n'accepter que des entiers
+                        visible=True,
                     )
 
-                with gr.Row():
-                    horizon_pred = gr.Dropdown(
-                        choices=["1 mois", "3 mois", "6 mois", "1 an"],
-                        label="Horizon de prédiction",
-                    )
+                # Fonction de mise à jour de l'interface selon le service
+                def update_prediction_fields(service):
+                    if service == "Projection Criminelle":
+                        return {
+                            dept_pred: gr.update(visible=True),
+                            crime_type_pred: gr.update(visible=True),
+                            target_year: gr.update(visible=True),
+                        }
+                    else:  # Analyse des Risques Émergents
+                        return {
+                            dept_pred: gr.update(visible=True),
+                            crime_type_pred: gr.update(visible=False),
+                            target_year: gr.update(visible=False),
+                        }
 
-                prediction_button = gr.Button("Prédire")
+                # Connexion de la fonction de mise à jour avec le dropdown de service
+                prediction_service.change(
+                    fn=update_prediction_fields,
+                    inputs=[prediction_service],
+                    outputs=[dept_pred, crime_type_pred, target_year],
+                )
 
-            # Onglet Requêtes simples (existant)
+                prediction_button = gr.Button("Analyser")
+
+            # Onglet Requêtes simples
             with gr.Tab("Requêtes simples"):
                 with gr.Row():
                     query_dropdown = gr.Dropdown(
@@ -298,26 +342,20 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                 # Création dynamique des plots en fonction du service sélectionné
                 def update_plots_visibility(service):
                     if service == "Sécurité Immobilière":
-                        logger.info("Updating plots visibility for Sécurité Immobilière")
+                        logger.info(
+                            "Updating plots visibility for Sécurité Immobilière"
+                        )
                         return {
-                            plot1: gr.update(
-                                visible=True, label="P1"
-                            ),
-                            plot2: gr.update(
-                                visible=True, label="P2"
-                            ),
+                            plot1: gr.update(visible=True, label="P1"),
+                            plot2: gr.update(visible=True, label="P2"),
                             plot3: gr.update(visible=True),
                             plot4: gr.update(visible=True),
                         }
                     else:
                         return {
                             plot1: gr.update(visible=True, label="P1"),
-                            plot2: gr.update(
-                                visible=True, label="P2"
-                            ),
-                            plot3: gr.update(
-                                visible=False, label="P3"
-                            ),
+                            plot2: gr.update(visible=True, label="P2"),
+                            plot3: gr.update(visible=False, label="P3"),
                             plot4: gr.update(visible=False, label="P4"),
                         }
 
@@ -345,27 +383,29 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
             def update_security_fields(service):
                 if service == "TransportSécurité":
                     return {
-                        dept_security: gr.update(visible=True, label="Département de départ"),
+                        dept_security: gr.update(
+                            visible=True, label="Département de départ"
+                        ),
                         dept_security_dest: gr.update(visible=True),
-                        year_security: gr.update(visible=True)
+                        year_security: gr.update(visible=True),
                     }
                 elif service == "AlerteVoisinage":
                     return {
                         dept_security: gr.update(visible=True, label="Département"),
                         dept_security_dest: gr.update(visible=False),
-                        year_security: gr.update(visible=True)
+                        year_security: gr.update(visible=True),
                     }
                 elif service == "BusinessSecurity":
                     return {
                         dept_security: gr.update(visible=True, label="Département"),
                         dept_security_dest: gr.update(visible=False),
-                        year_security: gr.update(visible=True)
+                        year_security: gr.update(visible=True),
                     }
                 else:
                     return {
                         dept_security: gr.update(visible=True, label="Département"),
                         dept_security_dest: gr.update(visible=False),
-                        year_security: gr.update(visible=True)
+                        year_security: gr.update(visible=True),
                     }
 
             # Connexion du bouton d'analyse
@@ -376,7 +416,7 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                     dept_security,
                     year_security,
                     dept_security_dest,
-                    crime_type_security
+                    crime_type_security,
                 ],
                 outputs=[output_df, insights, plot1, plot2, plot3, plot4],
             )
@@ -384,15 +424,14 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
         territorial_button.click(
             fn=interface_manager.territorial_service.process_request,
             inputs=[territorial_service, region_reference, region_comparison],
-            outputs=[output_df, insights, plot1, plot2]
+            outputs=[output_df, insights, plot1, plot2],
         )
 
         prediction_button.click(
-            interface_manager.predictive_service.process_request,
-            inputs=[prediction_service, crime_type_pred, dept_pred, horizon_pred],
-            outputs=[output_df, insights],
+            fn=interface_manager.predictive_service.process_request,
+            inputs=[prediction_service, dept_pred, crime_type_pred, target_year],
+            outputs=[output_df, insights, plot1, plot2],
         )
-
         # Event handlers for query buttons (existing)
         query_button.click(
             interface_manager.execute_predefined_query,
