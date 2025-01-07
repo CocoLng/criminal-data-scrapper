@@ -98,7 +98,7 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
     interface_manager = InterfaceManager()
 
     with gr.Blocks(title="Analyse de la Délinquance") as interface:
-        gr.Markdown("# Interface d'analyse de la délinquance")
+        gr.Markdown("# 🚨 Interface d'analyse de la délinquance")
 
         with gr.Tabs():
             # Onglet Sécurité
@@ -119,6 +119,7 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                     dept_security = gr.Dropdown(
                         choices=interface_manager.departements,
                         label="Département",
+                        value="75",
                         visible=True,
                     )
                     dept_security_dest = gr.Dropdown(
@@ -201,6 +202,7 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
                     region_reference = gr.Dropdown(
                         choices=interface_manager.regions,
                         label="Région de référence",
+                        value='75',
                         visible=True
                     )
                     region_comparison = gr.Dropdown(

@@ -22,29 +22,20 @@ class TerritorialService:
     ) -> Tuple[pd.DataFrame, str, gr.Plot, gr.Plot]:
         """Traite les requêtes d'analyse territoriale"""
         try:
-            empty_plots = [gr.Plot(), gr.Plot()]  # Plots vides au lieu de None
+            empty_plots = [gr.Plot(), gr.Plot()]
             
-            if service == "Diagnostic Régional":
-                df, recommendations = self._diagnostic_regional(region_ref)
-                if df.empty:
-                    return df, recommendations, *empty_plots
-                    
-                plots = empty_plots
-                # Création de la heatmap régionale
-                heatmap = self.visualizer.create_regional_heatmap(df)
-                if heatmap is not None:
-                    plots[0] = gr.Plot(heatmap)
-                
-                # Création du radar régional
-                radar = self.visualizer.create_regional_radar(df)
-                if radar is not None:
-                    plots[1] = gr.Plot(radar)
-                    
-                return df, recommendations, *plots
-                
-            elif service == "Comparaison Inter-Régionale":
+            if service == "Comparaison Inter-Régionale":
                 if not region_comp:
                     return pd.DataFrame(), "Veuillez sélectionner une région à comparer", *empty_plots
+                
+                # Gestion du cas où les régions sont identiques
+                if region_ref == region_comp:
+                    default_region = "75" if region_ref != "75" else "11"
+                    logger.warning(
+                        f"Régions identiques sélectionnées ({region_ref}). " +
+                        f"Utilisation de la région {default_region} pour la comparaison."
+                    )
+                    region_comp = default_region
                     
                 df, recommendations = self._comparaison_interregionale(region_ref, region_comp)
                 if df.empty:
@@ -146,57 +137,50 @@ class TerritorialService:
     def _comparaison_interregionale(self, region_ref: str, region_comp: str) -> Tuple[pd.DataFrame, str]:
         """Compare deux régions spécifiques"""
         query = """
-        WITH BaseStats AS (
+        WITH RegionStats AS (
             SELECT 
                 d.code_region,
+                d.code_departement,
                 c.type_crime,
                 c.annee,
-                s.taux_pour_mille
+                s.taux_pour_mille,
+                COUNT(*) OVER (PARTITION BY d.code_region, c.type_crime) as nb_departements,
+                AVG(s.taux_pour_mille) OVER (PARTITION BY d.code_region, c.type_crime) as taux_moyen,
+                MIN(s.taux_pour_mille) OVER (PARTITION BY d.code_region, c.type_crime) as taux_min,
+                MAX(s.taux_pour_mille) OVER (PARTITION BY d.code_region, c.type_crime) as taux_max,
+                STDDEV(s.taux_pour_mille) OVER (PARTITION BY d.code_region, c.type_crime) as ecart_type,
+                CASE 
+                    WHEN d.code_region = %s THEN 'RÉGION_RÉFÉRENCE'
+                    ELSE 'RÉGION_COMPARÉE'
+                END as type_region
             FROM crimes c
             JOIN statistiques s ON c.id_crime = s.id_crime
             JOIN departements d ON s.code_departement = d.code_departement
             WHERE d.code_region IN (%s, %s)
             AND c.annee = (SELECT MAX(annee) FROM crimes)
-        ),
-        RegionStats AS (
-            SELECT 
-                code_region,
-                type_crime,
-                annee,
-                COUNT(*) as nb_departements,
-                AVG(taux_pour_mille) as taux_moyen,
-                MIN(taux_pour_mille) as taux_min,
-                MAX(taux_pour_mille) as taux_max,
-                STDDEV(taux_pour_mille) as ecart_type
-            FROM BaseStats
-            GROUP BY code_region, type_crime, annee
         )
         SELECT 
-            r1.*,
-            CASE 
-                WHEN r1.code_region = %s THEN 'RÉGION_RÉFÉRENCE'
-                ELSE 'RÉGION_COMPARÉE'
-            END as type_region,
-            -- Calcul de l'écart entre les deux régions
+            rs.*,
             ROUND(
                 CASE 
-                    WHEN r1.code_region = %s 
-                    THEN ((r1.taux_moyen - r2.taux_moyen) / NULLIF(r2.taux_moyen, 0) * 100)
-                    ELSE ((r2.taux_moyen - r1.taux_moyen) / NULLIF(r1.taux_moyen, 0) * 100)
-                END,
+                    WHEN rs.type_region = 'RÉGION_RÉFÉRENCE' THEN
+                        ((rs.taux_moyen - comp.taux_moyen) / NULLIF(comp.taux_moyen, 0) * 100)
+                    ELSE
+                        ((comp.taux_moyen - rs.taux_moyen) / NULLIF(rs.taux_moyen, 0) * 100)
+                END, 
             2) as ecart_pourcentage
-        FROM RegionStats r1
-        CROSS JOIN RegionStats r2
-        WHERE r1.type_crime = r2.type_crime
-        AND r1.annee = r2.annee
-        AND ((r1.code_region = %s AND r2.code_region = %s)
-            OR (r1.code_region = %s AND r2.code_region = %s))
-        ORDER BY r1.type_crime, r1.taux_moyen DESC;
+        FROM RegionStats rs
+        JOIN (
+            SELECT type_crime, taux_moyen
+            FROM RegionStats
+            WHERE type_region = 'RÉGION_RÉFÉRENCE'
+            GROUP BY type_crime, taux_moyen
+        ) comp ON rs.type_crime = comp.type_crime
+        ORDER BY rs.type_crime, rs.code_region, rs.taux_pour_mille;
         """
         
         try:
-            params = (region_ref, region_comp, region_ref, region_ref, 
-                    region_ref, region_comp, region_comp, region_ref)
+            params = (region_ref, region_ref, region_comp)
             df = self.db.execute_query(query, params)
             recommendations = self._generate_comparison_recommendations(df, region_ref, region_comp)
             return df, recommendations
@@ -204,7 +188,7 @@ class TerritorialService:
         except Exception as e:
             logger.error(f"Erreur dans _comparaison_interregionale: {str(e)}")
             return pd.DataFrame(), "Erreur lors de la comparaison inter-régionale"
-
+    
     def _evolution_regionale(self, region: str) -> Tuple[pd.DataFrame, str]:
         """Analyse l'évolution temporelle des tendances régionales"""
         query = """
