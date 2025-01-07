@@ -1,12 +1,15 @@
-import pandas as pd
-from typing import Tuple, List
-from database.database import DatabaseConnection
-from view.security_view import SecurityVisualization
 import logging
+from typing import Tuple
+
 import gradio as gr
+import pandas as pd
 import plotly.graph_objects as go
 
+from database.database import DatabaseConnection
+from view.security_view import SecurityVisualization
+
 logger = logging.getLogger(__name__)
+
 
 class SecurityService:
     def __init__(self):
@@ -20,148 +23,170 @@ class SecurityService:
         year: int,
         department_dest: str = None,
         crime_type: str = None,
-        radius: int = None
+        radius: int = None,
     ) -> Tuple[pd.DataFrame, str, gr.Plot, gr.Plot, gr.Plot, gr.Plot]:
         try:
             empty_plots = [None] * 4
-            
+
             # Convertir l'année en format complet
             full_year = 2000 + year if year < 100 else year
             logger.info(f"Année convertie : {year} -> {full_year}")
-            
+
             # Obtenir les données et recommandations
             df, recommendations = self._get_service_data(
                 service, department, year, department_dest, crime_type, radius
             )
             if df.empty:
                 return (df, "Aucune donnée disponible", *empty_plots)
-                
+
             try:
                 if service == "TransportSécurité":
                     plots = empty_plots
-                    
+
                     # Création du radar des risques
                     risk_radar = self.visualizer.create_transport_risk_radar(df)
                     if risk_radar is not None:
                         plots[0] = gr.Plot(risk_radar)
-                    
+
                     # Création de la timeline des incidents
                     timeline = self.visualizer.create_transport_timeline(df)
                     if timeline is not None:
                         plots[1] = gr.Plot(timeline)
-                    
+
                     return (df, recommendations, *plots)
                 if service == "OptimisationAssurance":
                     try:
                         # Récupération des données
-                        df, recommendations = self._insurance_optimization(department, year)
+                        df, recommendations = self._insurance_optimization(
+                            department, year
+                        )
                         if df.empty:
                             return df, "Aucune donnée disponible", *empty_plots
-                        
+
                         # Initialisation des visualisations
                         plots = empty_plots
-                        
+
                         # Création de la heatmap de risque
                         risk_heatmap = self.visualizer.create_insurance_risk_heatmap(df)
                         if risk_heatmap:
                             plots[0] = gr.Plot(risk_heatmap)
-                        
+
                         # Création du scoring territorial
                         scoring_plot = self.visualizer.create_insurance_scoring(df)
                         if scoring_plot:
                             plots[1] = gr.Plot(scoring_plot)
-                        
+
                         return df, recommendations, *plots
-                        
+
                     except Exception as e:
-                        logger.error(f"Erreur lors du traitement OptimisationAssurance: {e}")
+                        logger.error(
+                            f"Erreur lors du traitement OptimisationAssurance: {e}"
+                        )
                         logger.exception("Détails de l'erreur:")
                         return pd.DataFrame(), f"Erreur: {str(e)}", *empty_plots
-                        
+
                 if service == "BusinessSecurity":
                     plots = empty_plots
-                    
+
                     # Création de la heatmap d'impact business
                     impact_fig = self.visualizer.create_business_impact_heatmap(df)
                     if impact_fig is not None:
                         plots[0] = gr.Plot(impact_fig)
-                    
+
                     # Création de l'évaluation des zones
                     zone_fig = self.visualizer.create_business_zone_assessment(df)
                     if zone_fig is not None:
                         plots[1] = gr.Plot(zone_fig)
-                    
+
                     return (df, recommendations, *plots)
                 if service == "AlerteVoisinage":
                     plots = empty_plots
-                    
+
                     # Debug
                     logger.info(f"Données reçues: \n{df.head()}")
-                    
+
                     fig = None
                     if full_year == 2016:
                         logger.info("Création du message pour 2016")
                         fig = go.Figure()
-                        
+
                         # Ajout d'un rectangle de fond pour mieux voir le message
                         fig.add_shape(
                             type="rect",
-                            x0=0, y0=0, x1=1, y1=1,
-                            xref="paper", yref="paper",
+                            x0=0,
+                            y0=0,
+                            x1=1,
+                            y1=1,
+                            xref="paper",
+                            yref="paper",
                             fillcolor="white",
-                            line_width=0
+                            line_width=0,
                         )
-                        
+
                         # Icône d'information
                         fig.add_annotation(
                             text="ℹ️",
-                            xref="paper", yref="paper",
-                            x=0.5, y=1.25,
+                            xref="paper",
+                            yref="paper",
+                            x=0.5,
+                            y=1.25,
                             showarrow=False,
                             font=dict(size=40),
-                            align="center"
+                            align="center",
                         )
-                        
+
                         # Titre
                         fig.add_annotation(
                             text="Données historiques insuffisantes",
-                            xref="paper", yref="paper",
-                            x=0.5, y=1,
+                            xref="paper",
+                            yref="paper",
+                            x=0.5,
+                            y=1,
                             showarrow=False,
                             font=dict(size=24, color="darkblue", family="Arial Black"),
-                            align="center"
+                            align="center",
                         )
-                        
+
                         # Message explicatif
                         fig.add_annotation(
                             text=(
-                                "2016 est la première année de nos données.<br>" +
-                                "Le calcul du niveau d'alerte nécessite un historique<br>" +
-                                "d'au moins 2 ans pour être pertinent.<br><br>" +
-                                "👉 Consultez les années ultérieures pour<br>" +
-                                "voir l'évolution des alertes."
+                                "2016 est la première année de nos données.<br>"
+                                + "Le calcul du niveau d'alerte nécessite un historique<br>"
+                                + "d'au moins 2 ans pour être pertinent.<br><br>"
+                                + "👉 Consultez les années ultérieures pour<br>"
+                                + "voir l'évolution des alertes."
                             ),
-                            xref="paper", yref="paper",
-                            x=0.5, y=0.4,
+                            xref="paper",
+                            yref="paper",
+                            x=0.5,
+                            y=0.4,
                             showarrow=False,
                             font=dict(size=16, color="gray"),
-                            align="center"
+                            align="center",
                         )
-                        
+
                         fig.update_layout(
                             showlegend=False,
                             height=300,
-                            paper_bgcolor='white',
-                            plot_bgcolor='white',
+                            paper_bgcolor="white",
+                            plot_bgcolor="white",
                             margin=dict(t=50, b=50, l=50, r=50),
-                            xaxis={'showgrid': False, 'showticklabels': False, 'zeroline': False},
-                            yaxis={'showgrid': False, 'showticklabels': False, 'zeroline': False}
+                            xaxis={
+                                "showgrid": False,
+                                "showticklabels": False,
+                                "zeroline": False,
+                            },
+                            yaxis={
+                                "showgrid": False,
+                                "showticklabels": False,
+                                "zeroline": False,
+                            },
                         )
                         logger.info("Message 2016 créé avec succès")
                     else:
                         logger.info("Création de la jauge standard")
                         fig = self.visualizer.create_alert_gauge(df)
-                    
+
                     # Si on a une figure, on la convertit en Plot
                     if fig is not None:
                         logger.info("Conversion de la figure en Plot")
@@ -169,28 +194,33 @@ class SecurityService:
                     else:
                         logger.warning("Aucune figure créée")
                         plots[0] = gr.Plot()  # Plot vide plutôt que None
-                    
+
                     # Création de la heatmap
                     alert_heatmap = self.visualizer.create_alert_heatmap(df)
                     if alert_heatmap is not None:
                         plots[1] = gr.Plot(alert_heatmap)
                     else:
                         plots[1] = gr.Plot()  # Plot vide plutôt que None
-                    
+
                     return (df, recommendations, *plots)
-                    
+
                 elif service == "Sécurité Immobilière":
                     figures = self.visualizer.generate_security_visualizations(df)
-                    plots = [gr.Plot(fig) if fig else gr.Plot() for fig in (figures + empty_plots)[:4]]
+                    plots = [
+                        gr.Plot(fig) if fig else gr.Plot()
+                        for fig in (figures + empty_plots)[:4]
+                    ]
                     return (df, recommendations, *plots)
-                
+
                 return (df, recommendations, *empty_plots)
-            
+
             except Exception as viz_error:
-                logger.error(f"Erreur lors de la génération des visualisations: {viz_error}")
+                logger.error(
+                    f"Erreur lors de la génération des visualisations: {viz_error}"
+                )
                 logger.exception("Détails de l'erreur:")
                 return (df, recommendations, *empty_plots)
-            
+
         except Exception as e:
             logger.error(f"Erreur dans process_request: {str(e)}")
             logger.exception("Détails de l'erreur:")
@@ -202,8 +232,8 @@ class SecurityService:
         department: str,
         year: int,
         department_dest: str = None,
-        crime_type: str = None,  
-        radius: int = None
+        crime_type: str = None,
+        radius: int = None,
     ) -> Tuple[pd.DataFrame, str]:
         """Get the service specific data"""
         try:
@@ -211,7 +241,9 @@ class SecurityService:
             if service == "TransportSécurité":
                 return self._transport_security(department, department_dest)
             elif service == "Sécurité Immobilière":
-                logger.info(f"Exécution de _real_estate_security pour dept={department}")
+                logger.info(
+                    f"Exécution de _real_estate_security pour dept={department}"
+                )
                 return self._real_estate_security(department, year)
             elif service == "AlerteVoisinage":
                 return self._neighborhood_alert(department, year, radius)
@@ -227,8 +259,10 @@ class SecurityService:
             logger.error(f"Erreur dans _get_service_data: {str(e)}")
             logger.exception("Détails de l'erreur:")
             return pd.DataFrame(), f"Erreur: {str(e)}"
-        
-    def _real_estate_security(self, department: str, year: int) -> Tuple[pd.DataFrame, str]:
+
+    def _real_estate_security(
+        self, department: str, year: int
+    ) -> Tuple[pd.DataFrame, str]:
         """Analyse les métriques de sécurité immobilière"""
         query = """
         WITH 
@@ -292,7 +326,7 @@ class SecurityService:
         FROM SecurityScore
         ORDER BY type_crime;
         """
-        
+
         try:
             df = self.db.execute_query(query, (department, year))
             logger.info(f"Données récupérées: {len(df)} lignes")
@@ -301,8 +335,10 @@ class SecurityService:
         except Exception as e:
             logger.error(f"Erreur lors de l'analyse immobilière: {str(e)}")
             return pd.DataFrame(), "Erreur lors de l'analyse des données immobilières"
-    
-    def _neighborhood_alert(self, department: str, year: int, radius: int = None) -> Tuple[pd.DataFrame, str]:
+
+    def _neighborhood_alert(
+        self, department: str, year: int, radius: int = None
+    ) -> Tuple[pd.DataFrame, str]:
         """Generate neighborhood alerts and risk analysis"""
         query = """
         WITH TemporalTrends AS (
@@ -383,27 +419,29 @@ class SecurityService:
         FROM RiskAssessment
         ORDER BY z_score DESC;
         """
-        
+
         try:
             df = self.db.execute_query(query, (department, year))
             logger.info(f"Données récupérées pour alerte voisinage: {len(df)} lignes")
             logger.debug(f"Échantillon des données: \n{df.head()}")
-            
+
             if df.empty:
                 return df, "Aucune donnée disponible pour cette période"
-                
+
             recommendations = self._generate_alert_recommendations(df)
             return df, recommendations
-            
+
         except Exception as e:
             logger.error(f"Erreur dans _neighborhood_alert: {str(e)}")
             logger.exception("Détails de l'erreur:")
             return pd.DataFrame(), f"Erreur lors de l'analyse : {str(e)}"
-    
-    def _business_security(self, department: str, year: int = None) -> Tuple[pd.DataFrame, str]:
+
+    def _business_security(
+        self, department: str, year: int = None
+    ) -> Tuple[pd.DataFrame, str]:
         """Analyze business security risks with historical context"""
         logger.info(f"Exécution de business_security pour dept={department}")
-        
+
         query = """
         WITH 
         -- Statistiques nationales
@@ -450,23 +488,25 @@ class SecurityService:
             AND ds.annee = ns.annee
         ORDER BY ds.annee DESC, ds.taux_dept DESC;
         """
-        
+
         try:
             df = self.db.execute_query(query, (department,))
-            
+
             logger.info(f"Données récupérées: {len(df)} lignes")
             if df.empty:
                 logger.warning("Aucune donnée trouvée pour les paramètres donnés")
                 return df, "Aucune donnée trouvée pour ces critères"
-                
+
             recommendations = self._generate_business_recommendations(df)
             return df, recommendations
         except Exception as e:
             logger.error(f"Erreur dans _business_security: {str(e)}")
             logger.exception("Détails de l'erreur:")
             return pd.DataFrame(), "Erreur lors de l'analyse des données commerciales"
-    
-    def _insurance_optimization(self, department: str, year: int) -> Tuple[pd.DataFrame, str]:
+
+    def _insurance_optimization(
+        self, department: str, year: int
+    ) -> Tuple[pd.DataFrame, str]:
         """Calculate insurance risk scores"""
         query = """
         WITH RiskMetrics AS (
@@ -499,31 +539,29 @@ class SecurityService:
         FROM InsuranceScore
         ORDER BY score_assurance DESC;
         """
-        
+
         df = self.db.execute_query(query, (department, year))
         recommendations = self._generate_insurance_recommendations(df)
         return df, recommendations
 
     def _transport_security(
-        self, 
-        dept_depart: str, 
-        dept_arrivee: str
+        self, dept_depart: str, dept_arrivee: str
     ) -> Tuple[pd.DataFrame, str]:
         """
         Analyze transport security risks between two departments across all years
-        
+
         Args:
             dept_depart (str): Code du département de départ
             dept_arrivee (str): Code du département d'arrivée
-            
+
         Returns:
             Tuple[pd.DataFrame, str]: DataFrame avec les statistiques et message de recommandation
         """
-        
+
         # Validation des entrées
         if not dept_depart or not dept_arrivee:
             return pd.DataFrame(), "Départements de départ et d'arrivée requis"
-                
+
         query = """
         WITH TransportStats AS (
             SELECT 
@@ -640,14 +678,14 @@ class SecurityService:
         WHERE annee = (SELECT MAX(annee) FROM TransportStats)
         ORDER BY code_departement, score_securite DESC;
         """
-        
+
         try:
             df = self.db.execute_query(query, (dept_depart, dept_arrivee))
             logger.info(f"Données récupérées: {len(df)} lignes")
-            
+
             if df.empty:
                 return df, "Aucune donnée trouvée pour ces départements"
-                
+
             recommendations = self._generate_transport_route_recommendations(
                 df, dept_depart, dept_arrivee
             )
@@ -656,15 +694,15 @@ class SecurityService:
             logger.error(f"Erreur dans _transport_security: {str(e)}")
             logger.exception("Détails de l'erreur:")
             return pd.DataFrame(), "Erreur lors de l'analyse des données de transport"
-    
+
     def _generate_real_estate_recommendations(self, df: pd.DataFrame) -> str:
         """Génère des recommandations pour la sécurité immobilière"""
         if df.empty:
             return "Aucune donnée disponible pour générer des recommandations"
-                
+
         # Calcul du score moyen (100 = moyenne nationale)
-        score_moyen = df['score_securite'].mean()
-        
+        score_moyen = df["score_securite"].mean()
+
         # Détermination du niveau de risque global
         if score_moyen < -20:
             niveau_risque = "ÉLEVÉ"
@@ -672,127 +710,145 @@ class SecurityService:
             niveau_risque = "MODÉRÉ"
         else:
             niveau_risque = "FAIBLE"
-        
+
         recommendations = [
-            f"🏘️ Analyse de sécurité immobilière :",
+            "🏘️ Analyse de sécurité immobilière :",
             f"\nNiveau de risque global: {niveau_risque}",
-            f"Score de sécurité: {score_moyen:.1f} (0 = moyenne nationale)"
+            f"Score de sécurité: {score_moyen:.1f} (0 = moyenne nationale)",
         ]
-        
+
         # Analyse détaillée par type de crime
         recommendations.append("\nAnalyse détaillée :")
-        current_year_data = df[df['annee'] == df['annee'].max()]
+        current_year_data = df[df["annee"] == df["annee"].max()]
         for _, row in current_year_data.iterrows():
-            score = row['score_securite']
+            score = row["score_securite"]
             signe = "+" if score > 0 else ""
             recommendations.append(
                 f"- {row['type_crime']}: {signe}{score:.1f} vs moyenne nationale "
                 f"({row['nombre_faits']} incidents)"
             )
-        
+
         # Recommandations spécifiques selon le niveau de risque
         recommendations.append("\nRecommandations :")
-        if niveau_risque == 'ÉLEVÉ':
-            recommendations.extend([
-                "⚠️ Zone nécessitant des mesures de sécurité renforcées :",
-                "• Installation de systèmes de sécurité avancés recommandée",
-                "• Coordination avec le voisinage et les forces de l'ordre conseillée",
-                "• Audit de sécurité détaillé avant acquisition",
-                "• Souscription à une assurance renforcée à envisager"
-            ])
-        elif niveau_risque == 'MODÉRÉ':
-            recommendations.extend([
-                "⚠️ Vigilance recommandée :",
-                "• Mesures de sécurité standards conseillées",
-                "• Participation aux initiatives de voisinage vigilant",
-                "• Vérification régulière des équipements de sécurité"
-            ])
+        if niveau_risque == "ÉLEVÉ":
+            recommendations.extend(
+                [
+                    "⚠️ Zone nécessitant des mesures de sécurité renforcées :",
+                    "• Installation de systèmes de sécurité avancés recommandée",
+                    "• Coordination avec le voisinage et les forces de l'ordre conseillée",
+                    "• Audit de sécurité détaillé avant acquisition",
+                    "• Souscription à une assurance renforcée à envisager",
+                ]
+            )
+        elif niveau_risque == "MODÉRÉ":
+            recommendations.extend(
+                [
+                    "⚠️ Vigilance recommandée :",
+                    "• Mesures de sécurité standards conseillées",
+                    "• Participation aux initiatives de voisinage vigilant",
+                    "• Vérification régulière des équipements de sécurité",
+                ]
+            )
         else:
-            recommendations.extend([
-                "✅ Zone sécurisée :",
-                "• Maintien des mesures de sécurité basiques",
-                "• Surveillance collaborative du voisinage",
-                "• Possibilité de réduction sur les assurances"
-            ])
-        
+            recommendations.extend(
+                [
+                    "✅ Zone sécurisée :",
+                    "• Maintien des mesures de sécurité basiques",
+                    "• Surveillance collaborative du voisinage",
+                    "• Possibilité de réduction sur les assurances",
+                ]
+            )
+
         # Ajout des points d'attention pour les scores très différents de la moyenne
-        significant_changes = df[abs(df['score_securite']) > 30]
+        significant_changes = df[abs(df["score_securite"]) > 30]
         if not significant_changes.empty:
             recommendations.append("\nPoints d'attention particuliers :")
             for _, change in significant_changes.iterrows():
-                signe = "+" if change['score_securite'] > 0 else ""
+                signe = "+" if change["score_securite"] > 0 else ""
                 recommendations.append(
                     f"• {change['type_crime']}: {signe}{change['score_securite']:.1f} "
                     f"par rapport à la moyenne nationale"
                 )
-                    
+
         return "\n".join(recommendations)
 
     def _generate_alert_recommendations(self, df: pd.DataFrame) -> str:
         """Generate enhanced neighborhood alert recommendations"""
         if df.empty:
             return "Aucune donnée disponible pour générer des alertes"
-                
+
         # Conversion des None en NaN pour faciliter le filtrage
         df_clean = df.copy()
-        df_clean['evolution_pourcentage'] = pd.to_numeric(df_clean['evolution_pourcentage'], errors='coerce')
-                
-        alerts = df_clean[df_clean['niveau_alerte'].isin(['ALERTE ROUGE', 'ALERTE ORANGE'])]
+        df_clean["evolution_pourcentage"] = pd.to_numeric(
+            df_clean["evolution_pourcentage"], errors="coerce"
+        )
+
+        alerts = df_clean[
+            df_clean["niveau_alerte"].isin(["ALERTE ROUGE", "ALERTE ORANGE"])
+        ]
         recommendations = ["🚨 Système d'alerte de voisinage :"]
-        
+
         # Analyse des alertes actives
         if not alerts.empty:
             recommendations.append("\nPoints d'attention critiques :")
             for _, alert in alerts.iterrows():
-                z_score = alert['z_score']
-                taux = alert['taux_pour_mille']
+                z_score = alert["z_score"]
+                taux = alert["taux_pour_mille"]
                 recommendations.append(
                     f"- {alert['type_crime']}: {alert['niveau_alerte']} "
                     f"(Intensité: {z_score:.1f}σ, Taux: {taux:.1f}‰)"
                 )
-                
+
                 # Recommandations selon le niveau d'alerte
-                if alert['niveau_alerte'] == 'ALERTE ROUGE':
-                    recommendations.extend([
-                        "  • Éviter les zones isolées",
-                        "  • Renforcer la vigilance collective",
-                        "  • Signaler toute activité suspecte",
-                        "  • Contact régulier avec les forces de l'ordre"
-                    ])
-                elif alert['niveau_alerte'] == 'ALERTE ORANGE':
-                    recommendations.extend([
-                        "  • Vigilance accrue recommandée",
-                        "  • Coordination avec le voisinage",
-                        "  • Vérification des dispositifs de sécurité"
-                    ])
+                if alert["niveau_alerte"] == "ALERTE ROUGE":
+                    recommendations.extend(
+                        [
+                            "  • Éviter les zones isolées",
+                            "  • Renforcer la vigilance collective",
+                            "  • Signaler toute activité suspecte",
+                            "  • Contact régulier avec les forces de l'ordre",
+                        ]
+                    )
+                elif alert["niveau_alerte"] == "ALERTE ORANGE":
+                    recommendations.extend(
+                        [
+                            "  • Vigilance accrue recommandée",
+                            "  • Coordination avec le voisinage",
+                            "  • Vérification des dispositifs de sécurité",
+                        ]
+                    )
         else:
-            recommendations.extend([
-                "✅ Aucune alerte majeure active",
-                "• Maintien de la vigilance normale",
-                "• Poursuite des bonnes pratiques de sécurité"
-            ])
-        
+            recommendations.extend(
+                [
+                    "✅ Aucune alerte majeure active",
+                    "• Maintien de la vigilance normale",
+                    "• Poursuite des bonnes pratiques de sécurité",
+                ]
+            )
+
         # Analyse des tendances significatives
         significant_trends = df_clean[
-            df_clean['evolution_pourcentage'].notna() & 
-            (abs(df_clean['evolution_pourcentage']) > 15)
+            df_clean["evolution_pourcentage"].notna()
+            & (abs(df_clean["evolution_pourcentage"]) > 15)
         ]
-        
+
         if not significant_trends.empty:
             recommendations.append("\nTendances significatives à surveiller :")
             for _, trend in significant_trends.iterrows():
-                evol = trend['evolution_pourcentage']
-                taux = trend['taux_pour_mille']
-                taux_prec = trend['taux_precedent'] if pd.notna(trend['taux_precedent']) else 0
-                
+                evol = trend["evolution_pourcentage"]
+                taux = trend["taux_pour_mille"]
+                taux_prec = (
+                    trend["taux_precedent"] if pd.notna(trend["taux_precedent"]) else 0
+                )
+
                 # Détermination de l'icône selon l'évolution
                 icon = "📈" if evol > 0 else "📉"
-                
+
                 recommendations.append(
                     f"- {icon} {trend['type_crime']}: {evol:+.1f}% d'évolution "
                     f"(Taux actuel: {taux:.1f}‰, Précédent: {taux_prec:.1f}‰)"
                 )
-                
+
                 # Ajout de conseils spécifiques pour les hausses importantes
                 if evol > 30:
                     recommendations.append(
@@ -802,7 +858,7 @@ class SecurityService:
                     recommendations.append(
                         "  • Situation à surveiller dans les prochains mois"
                     )
-        
+
         return "\n".join(recommendations)
 
     def _generate_business_recommendations(self, df: pd.DataFrame) -> str:
@@ -811,47 +867,51 @@ class SecurityService:
             return "Aucune donnée disponible pour l'analyse commerciale"
 
         recommendations = ["💼 Analyse de sécurité commerciale :"]
-        
+
         # Vérification de la présence des colonnes nécessaires
-        required_columns = ['niveau_risque_commercial', 'type_crime', 'risque_commercial']
+        required_columns = [
+            "niveau_risque_commercial",
+            "type_crime",
+            "risque_commercial",
+        ]
         if not all(col in df.columns for col in required_columns):
             return "Données insuffisantes pour l'analyse"
-        
+
         # Filtrer les lignes avec des valeurs non nulles
-        df_clean = df.dropna(subset=['niveau_risque_commercial', 'risque_commercial'])
-        
+        df_clean = df.dropna(subset=["niveau_risque_commercial", "risque_commercial"])
+
         # Analyse par niveau de risque
-        for risk_level in df_clean['niveau_risque_commercial'].unique():
-            group = df_clean[df_clean['niveau_risque_commercial'] == risk_level]
+        for risk_level in df_clean["niveau_risque_commercial"].unique():
+            group = df_clean[df_clean["niveau_risque_commercial"] == risk_level]
             if group.empty:
                 continue
-                
+
             recommendations.append(f"\n{risk_level} :")
             for _, row in group.iterrows():
-                risk_score = row['risque_commercial']
+                risk_score = row["risque_commercial"]
                 if pd.notna(risk_score):  # Vérification explicite des valeurs non-NA
                     recommendations.append(
                         f"- {row['type_crime']}: {risk_score:.2f} incidents pour 10000 habitants"
                     )
-                    
+
                     # Recommandations spécifiques selon le niveau de risque
-                    if risk_level == 'CRITIQUE':
+                    if risk_level == "CRITIQUE":
                         recommendations.append(
                             "  • Installation recommandée de système de sécurité avancé"
                             "\n  • Coordination conseillée avec les services de police"
                             "\n  • Formation du personnel aux situations à risque"
                         )
-                    elif risk_level == 'ÉLEVÉ':
+                    elif risk_level == "ÉLEVÉ":
                         recommendations.append(
                             "  • Renforcement de la surveillance pendant les heures à risque"
                             "\n  • Mise en place de procédures de sécurité standard"
                         )
 
         # Analyse temporelle si disponible
-        if 'evolution_pourcentage' in df.columns:
+        if "evolution_pourcentage" in df.columns:
             trends = df_clean[
-                df_clean['evolution_pourcentage'].notna() & 
-                (abs(df_clean['evolution_pourcentage']) > 10)
+                df_clean["evolution_pourcentage"].notna()
+                & (abs(df_clean["evolution_pourcentage"]) > 10)
             ]
             if not trends.empty:
                 recommendations.append("\nTendances significatives :")
@@ -869,33 +929,40 @@ class SecurityService:
             return "Aucune donnée disponible pour l'analyse assurantielle"
 
         # Vérification des colonnes requises
-        required_columns = ['quintile_risque', 'type_crime', 'indice_relatif']
+        required_columns = ["quintile_risque", "type_crime", "indice_relatif"]
         if not all(col in df.columns for col in required_columns):
             return "Données insuffisantes pour l'analyse"
 
         # Nettoyage des données
         df_clean = df.dropna(subset=required_columns)
-        
+
         recommendations = ["🔒 Analyse et recommandations assurantielles :"]
-        
+
         # Analyse par quintile de risque
         for quintile in range(1, 6):
-            quintile_data = df_clean[df_clean['quintile_risque'] == quintile]
+            quintile_data = df_clean[df_clean["quintile_risque"] == quintile]
             if quintile_data.empty:
                 continue
-                
-            risk_level = "TRÈS ÉLEVÉ" if quintile == 5 else \
-                        "ÉLEVÉ" if quintile == 4 else \
-                        "MOYEN" if quintile == 3 else \
-                        "FAIBLE" if quintile == 2 else "TRÈS FAIBLE"
-            
+
+            risk_level = (
+                "TRÈS ÉLEVÉ"
+                if quintile == 5
+                else "ÉLEVÉ"
+                if quintile == 4
+                else "MOYEN"
+                if quintile == 3
+                else "FAIBLE"
+                if quintile == 2
+                else "TRÈS FAIBLE"
+            )
+
             recommendations.append(f"\nNiveau de risque {risk_level} :")
             for _, row in quintile_data.iterrows():
-                if pd.notna(row['indice_relatif']):
+                if pd.notna(row["indice_relatif"]):
                     recommendations.append(
                         f"- {row['type_crime']}: Indice relatif {row['indice_relatif']:.1f}%"
                     )
-                    
+
                     # Recommandations spécifiques par niveau de risque
                     if quintile >= 4:
                         recommendations.append(
@@ -916,26 +983,20 @@ class SecurityService:
 
         return "\n".join(recommendations)
 
-
     def _generate_transport_route_recommendations(
-        self, 
-        df: pd.DataFrame, 
-        dept_depart: str, 
-        dept_arrivee: str
+        self, df: pd.DataFrame, dept_depart: str, dept_arrivee: str
     ) -> str:
         """Generate recommendations for transport route between departments"""
         if df.empty:
             return f"Aucune donnée disponible pour l'itinéraire {dept_depart} → {dept_arrivee}"
 
-        recommendations = [
-            f"🚛 Analyse de sécurité : {dept_depart} → {dept_arrivee}"
-        ]
+        recommendations = [f"🚛 Analyse de sécurité : {dept_depart} → {dept_arrivee}"]
 
         # 1. Analyse des départements
         for dept in [dept_depart, dept_arrivee]:
-            dept_data = df[df['code_departement'] == dept]
+            dept_data = df[df["code_departement"] == dept]
             if not dept_data.empty:
-                score_moyen = dept_data['score_securite'].mean()
+                score_moyen = dept_data["score_securite"].mean()
                 recommendations.append(
                     f"\n📍 Département {dept} "
                     f"(Score de sécurité: {score_moyen:.0f}/100) :"
@@ -943,11 +1004,11 @@ class SecurityService:
 
                 # Points d'attention spécifiques avec tendances
                 risques_eleves = dept_data[
-                    (dept_data['niveau_risque'] == 'RISQUE ÉLEVÉ') |
-                    (dept_data['tendance'] == 'EN HAUSSE')
+                    (dept_data["niveau_risque"] == "RISQUE ÉLEVÉ")
+                    | (dept_data["tendance"] == "EN HAUSSE")
                 ]
                 for _, risque in risques_eleves.iterrows():
-                    tendance_icon = "📈" if risque['tendance'] == 'EN HAUSSE' else "📊"
+                    tendance_icon = "📈" if risque["tendance"] == "EN HAUSSE" else "📊"
                     recommendations.append(
                         f"- {tendance_icon} {risque['type_crime']}: "
                         f"{risque['taux_100k']:.1f} incidents/100k hab. "
@@ -956,23 +1017,28 @@ class SecurityService:
 
         # 2. Comparaison des risques entre départements
         recommendations.append("\n🔄 Analyse comparative :")
-        for type_crime in df['type_crime'].unique():
-            crime_data = df[df['type_crime'] == type_crime]
+        for type_crime in df["type_crime"].unique():
+            crime_data = df[df["type_crime"] == type_crime]
             if len(crime_data) == 2:  # Si on a des données pour les deux départements
-                depart_rate = crime_data[crime_data['code_departement'] == dept_depart]['taux_100k'].iloc[0]
-                arrivee_rate = crime_data[crime_data['code_departement'] == dept_arrivee]['taux_100k'].iloc[0]
+                depart_rate = crime_data[crime_data["code_departement"] == dept_depart][
+                    "taux_100k"
+                ].iloc[0]
+                arrivee_rate = crime_data[
+                    crime_data["code_departement"] == dept_arrivee
+                ]["taux_100k"].iloc[0]
                 diff_rate = abs(depart_rate - arrivee_rate)
-                
+
                 if diff_rate > 10:  # Différence significative
-                    higher_dept = dept_arrivee if arrivee_rate > depart_rate else dept_depart
+                    higher_dept = (
+                        dept_arrivee if arrivee_rate > depart_rate else dept_depart
+                    )
                     recommendations.append(
                         f"- {type_crime}: {diff_rate:.1f} incidents/100k hab. de plus dans le dept {higher_dept}"
                     )
 
         # 3. Points de vigilance pour l'itinéraire
         risques_majeurs = df[
-            (df['niveau_risque'] == 'RISQUE ÉLEVÉ') & 
-            (df['tendance'] == 'EN HAUSSE')
+            (df["niveau_risque"] == "RISQUE ÉLEVÉ") & (df["tendance"] == "EN HAUSSE")
         ]
         if not risques_majeurs.empty:
             recommendations.append("\n⚠️ Points de vigilance majeurs :")

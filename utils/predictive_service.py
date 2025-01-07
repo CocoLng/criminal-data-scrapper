@@ -1,85 +1,96 @@
-import pandas as pd
+import logging
 from typing import Tuple
+
+import gradio as gr
+import pandas as pd
+
 from database.database import DatabaseConnection
 from view.predictive_view import PredictiveVisualization
-import logging
-import gradio as gr
 
 logger = logging.getLogger(__name__)
+
 
 class PredictiveService:
     def __init__(self):
         self.db = DatabaseConnection()
         self.visualizer = PredictiveVisualization()
-        
+
     def process_request(
         self,
         service: str,
         dept: str = None,
         crime_type: str = None,
-        target_year: int = 25
+        target_year: int = 25,
     ) -> Tuple[pd.DataFrame, str, gr.Plot, gr.Plot]:
         """Traite les requêtes d'analyse prédictive"""
         try:
             empty_plots = [gr.Plot(), gr.Plot()]
-            
+
             if service == "Projection Criminelle":
                 # Vérification des paramètres
                 if not dept:
                     return pd.DataFrame(), "Erreur: Département requis", *empty_plots
-                    
+
                 # Conversion et validation de l'année cible
                 try:
                     target_year = int(target_year)
                     if target_year < 24 or target_year > 30:
-                        return pd.DataFrame(), "Erreur: L'année de prédiction doit être entre 24 et 30", *empty_plots
+                        return (
+                            pd.DataFrame(),
+                            "Erreur: L'année de prédiction doit être entre 24 et 30",
+                            *empty_plots,
+                        )
                 except ValueError:
                     return pd.DataFrame(), "Erreur: Année invalide", *empty_plots
-                    
-                df, recommendations = self._projection_criminelle(dept, crime_type, target_year)
+
+                df, recommendations = self._projection_criminelle(
+                    dept, crime_type, target_year
+                )
                 if df.empty:
                     return df, recommendations, *empty_plots
-                    
+
                 plots = empty_plots
                 # Création de la courbe de projection
                 projection = self.visualizer.create_projection_curve(df)
                 if projection is not None:
                     plots[0] = gr.Plot(projection)
-                
+
                 # Création de la heatmap des prédictions
                 heatmap = self.visualizer.create_prediction_heatmap(df)
                 if heatmap is not None:
                     plots[1] = gr.Plot(heatmap)
-                    
+
                 return df, recommendations, *plots
-                
+
             elif service == "Analyse des Risques Émergents":
                 if not dept:
                     return pd.DataFrame(), "Erreur: Département requis", *empty_plots
-                    
+
                 df, recommendations = self._analyse_risques(dept)
                 if df.empty:
                     return df, recommendations, *empty_plots
-                    
+
                 plots = empty_plots
                 variations = self.visualizer.create_risk_variations(df)
                 if variations is not None:
                     plots[0] = gr.Plot(variations)
-                
+
                 correlations = self.visualizer.create_crime_correlations(df)
                 if correlations is not None:
                     plots[1] = gr.Plot(correlations)
-                    
+
                 return df, recommendations, *plots
-                
+
             else:
                 return pd.DataFrame(), "Service non reconnu", *empty_plots
-                
+
         except Exception as e:
             logger.error(f"Erreur dans process_request: {str(e)}")
             return pd.DataFrame(), f"Erreur: {str(e)}", *empty_plots
 
-    def _projection_criminelle(self, department: str, crime_type: str = None, target_year: int = 25) -> Tuple[pd.DataFrame, str]:
+    def _projection_criminelle(
+        self, department: str, crime_type: str = None, target_year: int = 25
+    ) -> Tuple[pd.DataFrame, str]:
         """Analyse et projette l'évolution des crimes jusqu'à l'année cible"""
         query = """
         WITH RECURSIVE Annees AS (
@@ -210,18 +221,22 @@ class PredictiveService:
         FROM FinalData
         ORDER BY type_crime, annee;
         """
-        
+
         try:
             # Ajout de l'année cible dans les paramètres de la requête
             params = (
-                department, crime_type, crime_type, 
+                department,
+                crime_type,
+                crime_type,
                 target_year,  # Nouvelle année cible
-                department, crime_type, crime_type  # Répétition des paramètres pour BaseData
+                department,
+                crime_type,
+                crime_type,  # Répétition des paramètres pour BaseData
             )
             df = self.db.execute_query(query, params)
             recommendations = self._generate_projection_recommendations(df, target_year)
             return df, recommendations
-                
+
         except Exception as e:
             logger.error(f"Erreur dans _projection_criminelle: {str(e)}")
             return pd.DataFrame(), f"Erreur lors de l'analyse des projections: {str(e)}"
@@ -331,36 +346,44 @@ class PredictiveService:
         FROM CorrelationData
         ORDER BY type_crime, type_crime_2;
         """
-        
+
         try:
             if not department:
                 logger.error("Paramètre département manquant")
                 return pd.DataFrame(), "Erreur : Département non spécifié"
-                
-            logger.info(f"Exécution de l'analyse des risques pour le département {department}")
+
+            logger.info(
+                f"Exécution de l'analyse des risques pour le département {department}"
+            )
             df = self.db.execute_query(query, (department,))
-            
+
             if df.empty:
-                logger.warning(f"Aucune donnée trouvée pour le département {department}")
+                logger.warning(
+                    f"Aucune donnée trouvée pour le département {department}"
+                )
                 return df, f"Aucune donnée disponible pour le département {department}"
-                
+
             recommendations = self._generate_risk_recommendations(df)
-            
-            logger.info(f"Analyse des risques terminée pour le département {department}")
+
+            logger.info(
+                f"Analyse des risques terminée pour le département {department}"
+            )
             return df, recommendations
-            
+
         except Exception as e:
             error_msg = f"Erreur dans _analyse_risques: {str(e)}"
             logger.error(error_msg)
             return pd.DataFrame(), f"Erreur lors de l'analyse des risques : {str(e)}"
 
-    def _generate_projection_recommendations(self, df: pd.DataFrame, target_year: int) -> str:
+    def _generate_projection_recommendations(
+        self, df: pd.DataFrame, target_year: int
+    ) -> str:
         """Génère des recommandations basées sur les projections
-        
+
         Args:
             df (pd.DataFrame): DataFrame contenant les données de projection
             target_year (int): Année cible de la projection
-            
+
         Returns:
             str: Recommandations formatées
         """
@@ -372,39 +395,42 @@ class PredictiveService:
         ]
 
         # Analyse des tendances par type de crime
-        for type_crime in df['type_crime'].unique():
-            crime_data = df[df['type_crime'] == type_crime]
-            last_historic = crime_data[crime_data['data_type'] == 'HISTORIQUE'].iloc[-1]
-            
+        for type_crime in df["type_crime"].unique():
+            crime_data = df[df["type_crime"] == type_crime]
+            last_historic = crime_data[crime_data["data_type"] == "HISTORIQUE"].iloc[-1]
+
             # Obtention des données pour l'année cible
             target_projection = crime_data[
-                (crime_data['data_type'] == 'PROJECTION') & 
-                (crime_data['annee'] == target_year)
+                (crime_data["data_type"] == "PROJECTION")
+                & (crime_data["annee"] == target_year)
             ].iloc[0]
-            
-            variation = ((target_projection['projection'] - last_historic['projection']) / 
-                        last_historic['projection'] * 100)
-            
+
+            variation = (
+                (target_projection["projection"] - last_historic["projection"])
+                / last_historic["projection"]
+                * 100
+            )
+
             recommendations.append(f"\n{type_crime}:")
             recommendations.append(
                 f"- Projection 20{target_year}: {target_projection['projection']:.1f}‰ "
                 f"({variation:+.1f}% vs. dernière valeur historique)"
             )
-            
+
             # Ajout de l'intervalle de confiance
             recommendations.append(
                 f"- Intervalle de confiance: [{target_projection['lower_bound']:.1f} - "
                 f"{target_projection['upper_bound']:.1f}]‰"
             )
-            
+
             # Évaluation de la fiabilité basée sur R²
-            if target_projection['r_squared'] > 0.7:
+            if target_projection["r_squared"] > 0.7:
                 recommendations.append("- ✅ Prédiction fiable (R² > 0.7)")
-            elif target_projection['r_squared'] > 0.5:
+            elif target_projection["r_squared"] > 0.5:
                 recommendations.append("- ⚠️ Prédiction moyennement fiable (R² > 0.5)")
             else:
                 recommendations.append("- ❌ Prédiction peu fiable (R² < 0.5)")
-            
+
             # Analyse de la tendance
             if variation > 10:
                 recommendations.append("- 🔴 Forte augmentation projetée")
@@ -425,7 +451,7 @@ class PredictiveService:
         ]
 
         # Analyse des tendances significatives
-        significant_risks = df[df['tendance'].isin(['FORTE_HAUSSE', 'FORTE_BAISSE'])]
+        significant_risks = df[df["tendance"].isin(["FORTE_HAUSSE", "FORTE_BAISSE"])]
         if not significant_risks.empty:
             recommendations.append("\nTendances significatives :")
             for _, risk in significant_risks.iterrows():
@@ -435,11 +461,11 @@ class PredictiveService:
                 )
 
         # Analyse des corrélations fortes
-        strong_correlations = df[abs(df['correlation']) > 0.7]
+        strong_correlations = df[abs(df["correlation"]) > 0.7]
         if not strong_correlations.empty:
             recommendations.append("\nCorrélations significatives :")
             for _, corr in strong_correlations.iterrows():
-                if corr['type_crime'] != corr['correlation']:
+                if corr["type_crime"] != corr["correlation"]:
                     recommendations.append(
                         f"- {corr['type_crime']} et {corr['correlation']} "
                         f"évoluent de manière similaire (corr: {abs(corr['correlation']):.2f})"
@@ -447,8 +473,8 @@ class PredictiveService:
 
         # Identification des risques prioritaires
         high_risks = df[
-            (df['variation_projetee'] > 20) & 
-            (df['derniere_valeur'] > df['derniere_valeur'].mean())
+            (df["variation_projetee"] > 20)
+            & (df["derniere_valeur"] > df["derniere_valeur"].mean())
         ]
         if not high_risks.empty:
             recommendations.append("\nPoints d'attention prioritaires :")

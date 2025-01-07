@@ -1,5 +1,6 @@
 from typing import Dict
 
+
 class QueryBuilder:
     @staticmethod
     def get_predefined_queries() -> Dict[str, Dict]:
@@ -23,9 +24,8 @@ class QueryBuilder:
                         AND c.annee = %s
                     ORDER BY c.type_crime
                 """,
-                "params": ["code_departement", "annee"]
+                "params": ["code_departement", "annee"],
             },
-            
             "Evolution d'un type de crime": {
                 "query": """
                     SELECT 
@@ -38,9 +38,8 @@ class QueryBuilder:
                     GROUP BY c.annee
                     ORDER BY c.annee
                 """,
-                "params": ["type_crime"]
+                "params": ["type_crime"],
             },
-            
             "Comparaison régionale": {
                 "query": """
                     SELECT 
@@ -59,9 +58,8 @@ class QueryBuilder:
                     GROUP BY d.code_region, c.type_crime, c.annee
                     ORDER BY total_faits DESC
                 """,
-                "params": ["type_crime", "annee"]
+                "params": ["type_crime", "annee"],
             },
-            
             "Top 10 départements": {
                 "query": """
                     SELECT 
@@ -81,9 +79,8 @@ class QueryBuilder:
                     ORDER BY s.taux_pour_mille DESC
                     LIMIT 10
                 """,
-                "params": ["type_crime", "annee"]
+                "params": ["type_crime", "annee"],
             },
-            
             "Analyse densité logements": {
                 "query": """
                     SELECT 
@@ -100,8 +97,8 @@ class QueryBuilder:
                     WHERE c.annee = %s
                     ORDER BY ratio_logements DESC
                 """,
-                "params": ["annee"]
-            }
+                "params": ["annee"],
+            },
         }
 
     @staticmethod
@@ -110,6 +107,14 @@ class QueryBuilder:
         Basic SQL injection prevention
         Returns True if query seems safe, False otherwise
         """
-        forbidden = ['DROP', 'DELETE', 'TRUNCATE', 'INSERT', 'UPDATE', 'CREATE', 'ALTER']
+        forbidden = [
+            "DROP",
+            "DELETE",
+            "TRUNCATE",
+            "INSERT",
+            "UPDATE",
+            "CREATE",
+            "ALTER",
+        ]
         upper_query = query.upper()
         return not any(word in upper_query for word in forbidden)

@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 # Chargement des variables d'environnement
 load_dotenv()
 
+
 def get_default_tables() -> Dict[str, str]:
     """Retourne la configuration par défaut des tables"""
     return {
@@ -43,7 +44,7 @@ def get_default_tables() -> Dict[str, str]:
                 INDEX idx_departement (code_departement),
                 INDEX idx_crime_dept (id_crime, code_departement)
             ) ENGINE=InnoDB
-        """
+        """,
     }
 
 
