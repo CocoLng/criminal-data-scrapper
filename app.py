@@ -99,6 +99,24 @@ class InterfaceManager:
 def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=7860):
     interface_manager = InterfaceManager()
 
+    def initialize_plot_visibility(security_service: str = "Sécurité Immobilière"):
+        """Initialize plot visibility based on default security service"""
+        if security_service == "Sécurité Immobilière":
+            return {
+                "plot1": {"visible": True, "label": "Évolution de la criminalité"},
+                "plot2": {"visible": True, "label": "Analyse comparative"},
+                "plot3": {"visible": True, "label": "Indicateurs de risque"},
+                "plot4": {"visible": True, "label": "Tendances saisonnières"}
+            }
+        else:
+            return {
+                "plot1": {"visible": True, "label": "Analyse principale"},
+                "plot2": {"visible": True, "label": "Données complémentaires"},
+                "plot3": {"visible": False, "label": ""},
+                "plot4": {"visible": False, "label": ""}
+            }
+
+
     with gr.Blocks(title="Analyse de la Délinquance") as interface:
         gr.Markdown("# 🚨 Interface d'analyse de la délinquance")
 
@@ -338,33 +356,52 @@ def create_and_launch_interface(share=False, server_name="0.0.0.0", server_port=
             # Zone de résultats commune au onglets
             with gr.Column():
                 gr.Markdown("## Visualisations")
+                
+                # Récupération de la configuration initiale
+                initial_plot_config = initialize_plot_visibility()
+                
+                with gr.Row():
+                    plot1 = gr.Plot(
+                        label=initial_plot_config["plot1"]["label"],
+                        visible=initial_plot_config["plot1"]["visible"]
+                    )
+                    plot2 = gr.Plot(
+                        label=initial_plot_config["plot2"]["label"],
+                        visible=initial_plot_config["plot2"]["visible"]
+                    )
+                with gr.Row():
+                    plot3 = gr.Plot(
+                        label=initial_plot_config["plot3"]["label"],
+                        visible=initial_plot_config["plot3"]["visible"]
+                    )
+                    plot4 = gr.Plot(
+                        label=initial_plot_config["plot4"]["label"],
+                        visible=initial_plot_config["plot4"]["visible"]
+                    )
 
-                # Création dynamique des plots en fonction du service sélectionné
+                # Fonction de mise à jour de la visibilité des plots
                 def update_plots_visibility(service):
-                    if service == "Sécurité Immobilière":
-                        logger.info(
-                            "Updating plots visibility for Sécurité Immobilière"
+                    logger.info(f"Updating plots visibility for service: {service}")
+                    plot_config = initialize_plot_visibility(service)
+                    
+                    return {
+                        plot1: gr.update(
+                            visible=plot_config["plot1"]["visible"],
+                            label=plot_config["plot1"]["label"]
+                        ),
+                        plot2: gr.update(
+                            visible=plot_config["plot2"]["visible"],
+                            label=plot_config["plot2"]["label"]
+                        ),
+                        plot3: gr.update(
+                            visible=plot_config["plot3"]["visible"],
+                            label=plot_config["plot3"]["label"]
+                        ),
+                        plot4: gr.update(
+                            visible=plot_config["plot4"]["visible"],
+                            label=plot_config["plot4"]["label"]
                         )
-                        return {
-                            plot1: gr.update(visible=True, label="P1"),
-                            plot2: gr.update(visible=True, label="P2"),
-                            plot3: gr.update(visible=True),
-                            plot4: gr.update(visible=True),
-                        }
-                    else:
-                        return {
-                            plot1: gr.update(visible=True, label="P1"),
-                            plot2: gr.update(visible=True, label="P2"),
-                            plot3: gr.update(visible=False, label="P3"),
-                            plot4: gr.update(visible=False, label="P4"),
-                        }
-
-                with gr.Row():
-                    plot1 = gr.Plot(label="P1")
-                    plot2 = gr.Plot(label="P2")
-                with gr.Row():
-                    plot3 = gr.Plot(label="P3", visible=False)
-                    plot4 = gr.Plot(label="P4", visible=False)
+                    }
 
                 # Connexion de l'événement de changement de service
                 security_service.change(
