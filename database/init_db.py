@@ -87,4 +87,3 @@ class DatabaseInitializer:
             if "conn" in locals() and conn.is_connected():
                 cursor.close()
                 conn.close()
-                logger.info("Connexion MySQL fermée")
